@@ -1362,7 +1362,7 @@ sub most_recent_history_links_query {
   foreach $article ( keys %$latest_old_ids ){
     
     if (!exists $latest_old_ids->{$article} || $latest_old_ids->{$article} !~ /^\d+$/){
-      print "---------Error in retrieving the latest history link of $article! "
+      print "Error in retrieving the latest history link of $article! "
 	 .  "I got '" . $latest_old_ids->{$article} . "' as history link!<br>\n";
     }
     
