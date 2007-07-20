@@ -1,13 +1,13 @@
 #!/usr/bin/perl -w
-use strict;                   # 'strict' insists that all variables be declared
-use diagnostics;              # 'diagnostics' expands the cryptic warnings
-use Encode;
 
 use lib $ENV{HOME} . '/public_html/cgi-bin/wp/modules'; # path to perl modules
 
-use Perlwikipedia; #Note that the 'p' is capitalized, due to Perl style
-require 'bin/perlwikipedia_utils.pl';
+use strict;                   # 'strict' insists that all variables be declared
+use diagnostics;              # 'diagnostics' expands the cryptic warnings
+use Encode;
+use Perlwikipedia;
 
+require 'bin/perlwikipedia_utils.pl';
 require 'bin/fetch_articles_cats.pl';
 require 'bin/html_encode_decode_string.pl';
 require 'bin/get_html.pl';
