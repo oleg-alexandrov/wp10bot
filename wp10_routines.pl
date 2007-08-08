@@ -502,7 +502,7 @@ sub compare_merge_and_log_diffs {
   $sep = ' ;; ';
   $old_ids_on_disk = {}; # empty hash for now
 
-  # create the old_ids file name. 
+  # Create the old_ids file name. This code for $old_ids_file_name  will need some work. 
   $dir = "/tmp/wp10/"; # will store here the file
   mkdir $dir unless (-e $dir);
   $old_ids_file_name = $list_name; 
@@ -1470,7 +1470,7 @@ sub write_old_ids_on_disk {
 
   # write to disk the updated old ids
   # do not write those old_ids with a time stamp older than $number_of_days
-  $number_of_days = 10; 
+  $number_of_days = 15; 
   $seconds = 60*60*24*$number_of_days;
 
   open(REV_WRITE_FILE, ">$old_ids_file_name");
