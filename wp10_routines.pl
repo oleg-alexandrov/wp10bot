@@ -1519,7 +1519,7 @@ sub old_id_to_hist_link {
 
 sub hist_link_to_article_name {
 
-  my ($hist_link, $article_name, $text, $error);
+  my ($hist_link, $article_name, $text, $error, $count);
 
   $hist_link = shift;
 
@@ -1528,16 +1528,24 @@ sub hist_link_to_article_name {
     return "";
   }
 
-  ($text, $error) = &get_html ($hist_link);
-  if ($text =~ /\<h1.*?\>(.*?)\</i){
-    $article_name = $1;
-  }else{
-    print "Error! Could not get article name for $hist_link !!!<br>\n";
-    exit(0);
+  # Do several attempts, for robustness
+  $article_name = "";
+  for ($count = 0; $count < 1000; $count++) {
+
+    ($text, $error) = &get_html ($hist_link);
+    if ($text =~ /\<h1.*?\>(.*?)\</i){
+      $article_name = $1;
+    }else{
+      print "Error! Could not get article name for $hist_link in attempt $count!!!<br>\n";
+      sleep 10;
+    }
+
   }
 
-# Unicode encoding seems to be necessary
-  #$article_name = encode('utf8', $article_name); 
+  if ($article_name =~ /^\s*$/){
+     print "Failed! Bailing out<br>\n";
+     exit (0);
+  } 
 
   return $article_name;
 }
