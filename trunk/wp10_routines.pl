@@ -1324,10 +1324,15 @@ sub current_date {
 sub most_recent_history_links_query {
   
   my ($articles, $latest_old_ids, $query_link, $link, $article, $article_enc, $max_no, $count,  $iter);
+  my ($max_url_length);
 
   $articles = shift;  $latest_old_ids = shift;
 
-  $max_no = 5; # in each query find the most recent history link of max_no articles at once, to speed things up
+  # in each query find the most recent history link of max_no articles at once, to speed things up
+  $max_no = 5;
+
+  $max_url_length = 500;
+
   $query_link = $Wiki_http . '/w/query.php?format=txt&what=revisions&rvlimit=1&titles=';
 
   $count=0; $link = $query_link;
@@ -1341,8 +1346,8 @@ sub most_recent_history_links_query {
     # do a bunch of queries at once
     $link = $link . $article_enc . '|';
     
-    # but no more than $max_no
-    if ($count >= $max_no){
+    # but no more than $max_no, and make sure each link is not too long
+    if ( $count >= $max_no || length ($link) > $max_url_length ){
       
       $link =~ s/\|$//g; # strip last pipe
       
@@ -1392,9 +1397,6 @@ sub run_history_query {
     $id = $2;
     $article =~ s/\s*$//g;
 
-    # Unicode encoding seems to be necessary
-    #$article = encode('utf8', $article); 
-    
     print "$article --> $id<br>\n";
     $latest_old_ids->{$article} = $id;
 
