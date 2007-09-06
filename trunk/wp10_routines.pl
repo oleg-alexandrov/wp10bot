@@ -1537,6 +1537,8 @@ sub hist_link_to_article_name {
     ($text, $error) = &get_html ($hist_link);
     if ($text =~ /\<h1.*?\>(.*?)\</i){
       $article_name = $1;
+      last;
+
     }else{
       print "Error! Could not get article name for $hist_link in attempt $count!!!<br>\n";
       sleep 10;
