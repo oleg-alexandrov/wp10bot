@@ -1611,7 +1611,6 @@ sub decide_order_of_running_projects {
   foreach $project (sort { $cur_project_stamps{$a} <=> $cur_project_stamps{$b} }
                     keys %cur_project_stamps ){
 
-    print "Next in order to run: $project\n";
     push (@$projects, $project);
   }
 }
