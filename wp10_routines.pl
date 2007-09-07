@@ -89,11 +89,11 @@ my $Editor;
 
 sub main_wp10_routine {
   
-  my (@subjects, @articles, $text, $file, $subject_category, $edit_summary);
-  my (%old_arts, %new_arts, $art, %wikiprojects, $art_name, $date, $dir, %stats, %logs, %lists, @breakpoints);
-  my ($todays_log, $front_matter, %repeats, %version_hash);
+  my (@projects, @articles, $text, $file, $project_category, $edit_summary);
+  my (%old_arts, %new_arts, $art, %wikiprojects, $art_name, $date, $dir, %stats, %logs, %lists);
+  my (@breakpoints, $todays_log, $front_matter, %repeats, %version_hash);
   my ($run_one_project_only, %map_qual_imp_to_cats, $stats_file);
-  my (%project_stats, %global_stats);
+  my (%project_stats, %global_stats, $done_projects_file, $sep);
   
   # go to the working directory
   $dir=$0; $dir =~ s/\/[^\/]*$/\//g; chdir $dir;
@@ -109,22 +109,26 @@ sub main_wp10_routine {
   $date=&current_date();
 
   # base-most stuff
-  &fetch_quality_categories(\@subjects);
-  &update_index(\@subjects, \%lists, \%logs, \%stats, \%wikiprojects, $date);
+  &fetch_quality_categories(\@projects);
+  &update_index(\@projects, \%lists, \%logs, \%stats, \%wikiprojects, $date);
 
+  # Go through @projects in the order of projects not done for a while get done first
+  $done_projects_file='Done_projects.txt'; $sep = ' -;;- ';
+  &decide_order_of_running_projects(\@projects, $done_projects_file, $sep);
+     
   if ($Lang eq 'en'){
     # need this because the biography project takes much, much more time than others
-    &put_biography_articles_last (\@subjects);
+    &put_biography_project_last (\@projects);
   }
 
   # go through a few categories containing version information (optional)
   &read_version (\%version_hash);
 
-  # go through all subjects, search the categories in there, and merge with existing information
-  foreach $subject_category (@subjects) {
+  # go through all projects, search the categories in there, and merge with existing information
+  foreach $project_category (@projects) {
 
     # if told to run just one project, ignore the others
-    next if ($run_one_project_only && $subject_category !~ /\Q$run_one_project_only\E/i);
+    next if ($run_one_project_only && $project_category !~ /\Q$run_one_project_only\E/i);
 
     # log in for each project (this should not be necessary but sometimes the bot oddly logs out)
     $Editor = wikipedia_login($Bot_name);
@@ -135,30 +139,34 @@ sub main_wp10_routine {
     }
 
     # read existing lists into %old_arts
-    $file = $lists{$subject_category};
+    $file = $lists{$project_category};
     ($text, $front_matter)=&fetch_list_subpages($file, \@breakpoints);
-    &extract_assessments ($subject_category, $text, \%old_arts); 
+    &extract_assessments ($project_category, $text, \%old_arts); 
 
     # Collect new articles from categories, in %new_arts.
-    &collect_new_from_categories ($subject_category, $date, \%new_arts, \%map_qual_imp_to_cats); 
+    &collect_new_from_categories ($project_category, $date, \%new_arts, \%map_qual_imp_to_cats); 
 
     # Do some counting and print the results in a table. Counting must happen before merging below,
     # as there unassessed biography articles will be removed.
-    $file=$stats{$subject_category};
+    $file=$stats{$project_category};
     &count_articles_by_quality_importance(\%new_arts, \%project_stats, \%global_stats, \%repeats);
-    $text = &print_table_of_quality_importance_data($subject_category, \%map_qual_imp_to_cats, \%project_stats)
-       . &print_current_category($subject_category);
+    $text = &print_table_of_quality_importance_data($project_category, \%map_qual_imp_to_cats, \%project_stats)
+       . &print_current_category($project_category);
 
     wikipedia_submit($Editor, $file, "$Statistics for $date", $text, $Attempts, $Sleep_submit); 
 
-    # the heart of the code, compare %old_arts and %new_arts, merge some info from old into new, and generate a log
-    $file = $lists{$subject_category};
-    $todays_log = &compare_merge_and_log_diffs($date, $file, $subject_category, \%old_arts, \%new_arts,
-					       \%version_hash);
-    &split_into_subpages_maybe_and_submit ($file, $subject_category, $front_matter, $wikiprojects{$subject_category},
-					   $date, \@breakpoints, \%new_arts);
+    # the heart of the code, compare %old_arts and %new_arts, merge some info
+    # from old into new, and generate a log
+    $file = $lists{$project_category};
+    $todays_log = &compare_merge_and_log_diffs($date, $file, $project_category,
+                                               \%old_arts, \%new_arts, \%version_hash);
+    
+    &split_into_subpages_maybe_and_submit ($file, $project_category, $front_matter,
+             $wikiprojects{$project_category}, $date, \@breakpoints, \%new_arts);
 
-    &process_submit_log($logs{$subject_category}, $todays_log, $subject_category, $date);
+    &process_submit_log($logs{$project_category}, $todays_log, $project_category, $date);
+
+    &mark_project_as_done($project_category, $done_projects_file, $sep);
   }
 
   # don't compute the total stats if the script was called just for one project
@@ -177,15 +185,15 @@ sub main_wp10_routine {
 
 sub fetch_quality_categories{
 
-  my ($subjects, $cat, @tmp_cats, @tmp_articles);
+  my ($projects, $cat, @tmp_cats, @tmp_articles);
   
-  $subjects = shift;
+  $projects = shift;
 
   # fetch all the subcategories of $Root_category
   &fetch_articles_cats($Root_category, \@tmp_cats, \@tmp_articles);
 
-  # put in @$subjects only the categories by quality
-  @$subjects=(); 
+  # put in @$projects only the categories by quality
+  @$projects=(); 
   foreach $cat (sort {$a cmp $b}  @tmp_cats){
     next unless ($cat =~ /^(.*?) \Q$By_quality\E/);
 
@@ -193,17 +201,17 @@ sub fetch_quality_categories{
       next if ($cat =~ /\Q$Category\E:Articles \Q$By_quality\E/); # silly meta category
     }
     
-    push (@$subjects, $cat);
+    push (@$projects, $cat);
   }
 }
 
 # Create a hash of hashes containing the files the bot will write to, and some other information.
-# Keep that hash of hashes on Wikipedia as an index of subjects.
+# Keep that hash of hashes on Wikipedia as an index of projects.
 sub update_index{
  
   my ($category, $text, $file, $line, $list, $stat, $log, $short_list, $preamble, $bottom);
   my ($wikiproject, $count, %sort_order);
-  my ($subjects, $lists, $logs, $stats, $wikiprojects, $date)=@_;
+  my ($projects, $lists, $logs, $stats, $wikiprojects, $date)=@_;
 
   # fetch existing index, read the wikiprojects from there (need that as names of wikiprojects can't be generated)
 
@@ -221,7 +229,7 @@ sub update_index{
   }
 
   # generate names for the files the bot will write to
-  foreach $category (@$subjects){
+  foreach $category (@$projects){
 
     $file =$category; $file =~ s/^\Q$Category\E://ig; $file = $Editorial_team . '/' . $file . '.wiki';
     $lists->{$category}=$file;
@@ -237,7 +245,7 @@ sub update_index{
     $sort_order{$category}=$file;
   }
 
-  # put that data in a index of subjects and submit to Wikipedia.
+  # put that data in a index of projects and submit to Wikipedia.
   $text = "";
   foreach $category (sort {$sort_order{$a} cmp $sort_order{$b}} keys %sort_order){
     
@@ -252,7 +260,7 @@ sub update_index{
 	  . "\[\[:$category\|" . lc($Category) . "\]\], \[\[$wikiproject\|" . lc($WikiProject) . "\]\]\)\n\|\-\n";
   }
 
-  $count=scalar @$subjects;
+  $count=scalar @$projects;
   $text = $preamble 
 	. "Currently, there are $count participating projects.\n\n" 
         . "\{\| class=\"wikitable\"\n"
@@ -349,8 +357,8 @@ sub fetch_list_subpages{
 # given the $text read from the list and it subpages, parse it and put the info in a hash
 sub extract_assessments{
   
-  my ($subject_category, $arts, $line, $art, $file, $text, $talkpage);
-  $subject_category=shift; $text = shift; $arts = shift; 
+  my ($project_category, $arts, $line, $art, $file, $text, $talkpage);
+  $project_category=shift; $text = shift; $arts = shift; 
   
   %$arts=(); # blank the hash, and populate it
   foreach $line (split ("\n", $text)) {
@@ -389,17 +397,17 @@ sub extract_assessments{
 sub collect_new_from_categories {
   
   my (@cats, @dummy, @articles, $article, $wikiproject, $new_arts, $art, $cat, @tmp, $counter);
-  my ($subject_category, $importance_category, $date, $qual, $imp, $comments_category, $map_qual_imp_to_cats);
+  my ($project_category, $importance_category, $date, $qual, $imp, $comments_category, $map_qual_imp_to_cats);
 
-  $subject_category=shift; $date = shift; $new_arts=shift; $map_qual_imp_to_cats = shift;
+  $project_category=shift; $date = shift; $new_arts=shift; $map_qual_imp_to_cats = shift;
 
   # blank two hashes before using them
   %$new_arts = (); 
   %$map_qual_imp_to_cats = (); 
   
-  # $subject_category (e.g., "Chemistry articicles by quality") contains subcategories of each quality.
+  # $project_category (e.g., "Chemistry articicles by quality") contains subcategories of each quality.
   # Read them and the articles categorized in them.  
-  &fetch_articles_cats($subject_category, \@cats, \@articles); 
+  &fetch_articles_cats($project_category, \@cats, \@articles); 
 
   # go through each of the FA-Class, A-Class, etc. categories and read their articles
   foreach $cat (@cats) {
@@ -430,7 +438,7 @@ sub collect_new_from_categories {
 
   # look in $importance_category, e.g., "Chemistry articles by importance", read its subcategories,
   # for example, "Top chemistry articles", etc.
-  $importance_category=$subject_category; $importance_category =~ s/\Q$By_quality\E/$By_importance/g;
+  $importance_category=$project_category; $importance_category =~ s/\Q$By_quality\E/$By_importance/g;
   &fetch_articles_cats($importance_category, \@cats, \@articles); 
 
   # for political reasons, the "by importance" category is called "by priority" by some projects,
@@ -473,7 +481,7 @@ sub collect_new_from_categories {
   }
   
   # fill in the comment field, for articles which are in a category meant to show that there is a comments subpage
-  $comments_category=$subject_category; $comments_category =~ s/\Q$By_quality\E/$With_comments/g;
+  $comments_category=$project_category; $comments_category =~ s/\Q$By_quality\E/$With_comments/g;
   &fetch_articles_cats($comments_category, \@cats, \@articles); 
   
   foreach $article (@articles) {
@@ -491,7 +499,7 @@ sub collect_new_from_categories {
 # the heart of the code
 sub compare_merge_and_log_diffs {
 
-  my ($date, $list_name, $subject_category, $old_arts, $new_arts, $version_hash) =@_;
+  my ($date, $list_name, $project_category, $old_arts, $new_arts, $version_hash) =@_;
   my ($log_text, $line, $art, $article, $latest_old_ids, $sep, $old_ids_on_disk, $old_ids_file_name, $text, $new_name, $dir);
 
   # the big loop to collect the data and the logs
@@ -558,7 +566,7 @@ sub compare_merge_and_log_diffs {
       # this is making the code a bit more complicated, but is necessary. Count (done already), but do not list
       # unassessed biography articles, as they are just too many (200,000).
 
-      if ($subject_category eq "Category:Biography articles by quality"
+      if ($project_category eq "Category:Biography articles by quality"
 	  && $new_arts->{$article}->{'quality'} eq $Unassessed_Class){
 	delete $new_arts->{$article};
 	next;
@@ -657,7 +665,7 @@ sub compare_merge_and_log_diffs {
 sub split_into_subpages_maybe_and_submit {
   my ($global_count, @count, $subpage_no, $subpage_file, @lines, $line, $subpage_frontmatter, @subpages);
   my ($max_pagesize, $min_pagesize, $name, $mx, $mn, $base_page, $i, $iplus, $text);
-  my ($file, $subject_category, $front_matter, $wikiproject, $date, $breakpoints, $new_arts)=@_;
+  my ($file, $project_category, $front_matter, $wikiproject, $date, $breakpoints, $new_arts)=@_;
 
   $max_pagesize=500; $min_pagesize=400;
   $base_page=$file; $base_page =~ s/\.wiki//g;
@@ -684,10 +692,10 @@ sub split_into_subpages_maybe_and_submit {
     print "Only $global_count articles. Won't split into subpages!\n";
     $text=join ("", @subpages);
     $text = $front_matter
-       . &print_table_header($subject_category, $wikiproject)
+       . &print_table_header($project_category, $wikiproject)
 	  . $text
-	     . &print_table_footer($date, $subject_category)
-		. &print_current_category ($subject_category);
+	     . &print_table_footer($date, $project_category)
+		. &print_current_category ($project_category);
 
     $Editor = wikipedia_login($Bot_name);  
     wikipedia_submit($Editor, $file, "Update for $date", $text, $Attempts, $Sleep_submit);   # submit to wikipedia
@@ -735,7 +743,7 @@ sub split_into_subpages_maybe_and_submit {
   }
 
   # Generate the index, and print header and footer to subpages. Submit
-  $text = $front_matter .  &print_index_header($subject_category, $wikiproject);
+  $text = $front_matter .  &print_index_header($project_category, $wikiproject);
   for ($i=0 ; $i <= $subpage_no; $i++){
     $iplus=$i+1;
     $text = $text . "\* \[\[$base_page\/" . $iplus . "\]\] \($count[$i] articles\)\n";
@@ -743,9 +751,9 @@ sub split_into_subpages_maybe_and_submit {
     # print a subpage. Note in line 4 the date field is empty, to not update a page if only the date changed
     my $empty_date="";
     $subpages[$i] = &print_navigation_bar($base_page, $iplus, $subpage_no+1)
-                  . &print_table_header($subject_category, $wikiproject)
+                  . &print_table_header($project_category, $wikiproject)
                   . $subpages[$i]     
-                  . &print_table_footer($empty_date, $subject_category) 
+                  . &print_table_footer($empty_date, $project_category) 
                   . &print_navigation_bar($base_page, $iplus, $subpage_no+1);
 
     $subpage_file = $base_page . "\/" . $iplus . ".wiki";
@@ -753,7 +761,7 @@ sub split_into_subpages_maybe_and_submit {
     wikipedia_submit($Editor, $subpage_file, "Update for $date", $subpages[$i], $Attempts, $Sleep_submit);
 
   }
-  $text = $text . &print_index_footer($date, $subject_category) . &print_current_category ($subject_category);
+  $text = $text . &print_index_footer($date, $project_category) . &print_current_category ($project_category);
   
   # submit the index of subpages
   $Editor = wikipedia_login($Bot_name);
@@ -763,9 +771,9 @@ sub split_into_subpages_maybe_and_submit {
 
 sub process_submit_log {
   my ($todays_log, $combined_log, $date, @logs, %log_hash, $entry, $heading, $body);
-  my (%order, $count, $subject_category, $file);
+  my (%order, $count, $project_category, $file);
   
-  $file = shift; $todays_log = shift; $subject_category = shift; $date = shift;
+  $file = shift; $todays_log = shift; $project_category = shift; $date = shift;
 
   # fetch the log from server, strip data before first section, and prepend today's log to it
   $combined_log=wikipedia_fetch($Editor, $file, $Attempts, $Sleep_fetch);
@@ -812,7 +820,7 @@ sub process_submit_log {
   $combined_log = &truncate_log($combined_log, 250000); # truncate log to 250K
 
   # categorize the logs, and put a message on top
-  $combined_log  =  '{{Log}}' . "\n" . &print_current_category($subject_category) . $combined_log;
+  $combined_log  =  '{{Log}}' . "\n" . &print_current_category($project_category) . $combined_log;
 
   wikipedia_submit($Editor, $file, "$Log for $date", $combined_log, $Attempts, $Sleep_submit);
 }
@@ -885,21 +893,21 @@ sub check_for_errors_reading_cats {
 
 sub print_table_of_quality_importance_data{
 
-  my ($subject_category, $map_qual_imp_to_cats, $project_stats) = @_;
-  my ($subject_sans_cat, $subject_br, $text, $key, @articles, $cat, @categories);
+  my ($project_category, $map_qual_imp_to_cats, $project_stats) = @_;
+  my ($project_sans_cat, $project_br, $text, $key, @articles, $cat, @categories);
   my ($qual, $qual_noclass, $imp, $imp_noclass, $link, @tmp);
 
   $map_qual_imp_to_cats = ()  if ($map_qual_imp_to_cats eq ""); # needed for the global totals
 
-  $subject_sans_cat = &strip_cat ($subject_category);
-  $subject_br = $subject_sans_cat; $subject_br =~ s/^(.*) (.*?)$/$1\<br\>$2/g; # insert a linebreak, to print nicer
+  $project_sans_cat = &strip_cat ($project_category);
+  $project_br = $project_sans_cat; $project_br =~ s/^(.*) (.*?)$/$1\<br\>$2/g; # insert a linebreak, to print nicer
   
   # start printing the table. Lots of ugly wikicode here.
 
   # initialize the table
   $text='{| class="wikitable" style="text-align: center;"
 |-
-! colspan="2" rowspan="2" | ' . $subject_br . ' !! colspan="6" | ' . $Importance_word . '
+! colspan="2" rowspan="2" | ' . $project_br . ' !! colspan="6" | ' . $Importance_word . '
 |-
 !';
 
@@ -1002,7 +1010,7 @@ sub print_table_of_quality_importance_data{
 # Save this action to disk.
 sub extra_categorizations {
 
-  my (@subjects, @articles, $text, $subject_category, $line, $cats_file, $file);
+  my (@projects, @articles, $text, $project_category, $line, $cats_file, $file);
   my (%map, @imp_cats, @cats, $cat, $sep, $type, $edit_summary, $trunc_cat);
 
   $sep='------'; 
@@ -1013,20 +1021,20 @@ sub extra_categorizations {
     $map{$1}=$2;
   }
   
-  &fetch_articles_cats($Root_category, \@subjects, \@articles); 
+  &fetch_articles_cats($Root_category, \@projects, \@articles); 
 
-  # go through all subjects, search the categories in there, and merge with existing information
-  foreach $subject_category (@subjects) {
+  # go through all projects, search the categories in there, and merge with existing information
+  foreach $project_category (@projects) {
 
     if ($Lang eq 'en'){
-      next if ($subject_category =~ /\Q$Category\E:Articles (\Q$By_quality\E|\Q$By_importance\E)/); # meta cat
+      next if ($project_category =~ /\Q$Category\E:Articles (\Q$By_quality\E|\Q$By_importance\E)/); # meta cat
     }
 
     # e.g., Category:Physics articles by quality
-    next unless ($subject_category =~ /articles (\Q$By_quality\E|\Q$By_importance\E)/);
+    next unless ($project_category =~ /articles (\Q$By_quality\E|\Q$By_importance\E)/);
     $type=$1;
     
-    &fetch_articles_cats($subject_category, \@cats, \@articles); 
+    &fetch_articles_cats($project_category, \@cats, \@articles); 
     foreach $cat (@cats){
       
       next if (exists $map{$cat}); # did this before
@@ -1070,25 +1078,25 @@ sub submit_global_stats{
 
 
 # this will only run on the English Wikipedia!
-sub put_biography_articles_last {
-  my (%hash_of_subjects, $subjects, $subject, $counter);
-  $subjects = shift;
+sub put_biography_project_last {
+  my (%hash_of_projects, $projects, $project, $counter);
+  $projects = shift;
 
   $counter=0; 
-  foreach $subject (@$subjects){
-    $hash_of_subjects{$subject} = $counter++;
+  foreach $project (@$projects){
+    $hash_of_projects{$project} = $counter++;
   }
   
-  $hash_of_subjects{$Category . ":Biography articles by quality"}=$counter++; # make this be last;
+  $hash_of_projects{$Category . ":Biography articles by quality"}=$counter++; # make this be last;
 
-  # put back into @$subjects, with that biography category last
-  @$subjects = ();
-  foreach $subject (sort {$hash_of_subjects{$a} <=> $hash_of_subjects{$b} } keys %hash_of_subjects){
-    push (@$subjects, $subject);
+  # put back into @$projects, with that biography category last
+  @$projects = ();
+  foreach $project (sort {$hash_of_projects{$a} <=> $hash_of_projects{$b} } keys %hash_of_projects){
+    push (@$projects, $project);
   }
 }
 
-# identify the parent Wikproject of the current subject category
+# identify the parent Wikproject of the current project category
 sub get_wikiproject {
   my ($category, $text, $error, $wikiproject, $wikiproject_alt);
   
@@ -1554,10 +1562,79 @@ sub hist_link_to_article_name {
   return $article_name;
 }
 
+sub mark_project_as_done {
+
+  my ($current_project, $done_projects_file, $sep) = @_;
+  my (%project_stamps, $text, $line, $project, $project_stamp);
+
+  &read_done_projects($done_projects_file, \%project_stamps, $sep);
+
+  # Mark the current project with the current time
+  $project_stamps{$current_project} = time();
+
+  # Write back to disk, with oldest coming first
+  open(FILE, ">$done_projects_file");
+  foreach $project (sort { $project_stamps{$a} <=> $project_stamps{$b} } keys %project_stamps){
+
+    $project_stamp = $project_stamps{$project};
+
+    # Also print the human-readable gmtime()
+    print FILE $project . $sep . $project_stamp . $sep . gmtime($project_stamp) . "\n";
+  }
+  close(FILE);
+
+}
+
+sub decide_order_of_running_projects {
+  
+  my ($projects, $done_projects_file, $sep) = @_;
+  my (%project_stamps, $project, $ten_days, $cur_time, %cur_project_stamps);
+
+  &read_done_projects($done_projects_file, \%project_stamps, $sep);
+
+  # Mark projects that were never done as very old, so that they are done first
+  $cur_time = time();
+  $ten_days = 10*24*60*60;
+  foreach $project (@$projects){
+    $project_stamps{$project} = $cur_time - $ten_days unless (exists $project_stamps{$project});
+  }
+
+  # Associate with each of @$projects its datestamp
+  # We won't use %project_stamps directly as that one may have projects which are no
+  # longer in @$projects
+  foreach $project (@$projects){
+    $cur_project_stamps{$project} = $project_stamps{$project};
+  }
+  
+  # put the projects in the order of oldest first (old meaning 'was not run for a while')
+  @$projects = ();
+  foreach $project (sort { $cur_project_stamps{$a} <=> $cur_project_stamps{$b} }
+                    keys %cur_project_stamps ){
+
+    print "Next in order to run: $project\n";
+    push (@$projects, $project);
+  }
+}
+
+sub read_done_projects {
+
+  my ($done_projects_file, $project_stamps, $sep) = @_;
+  my ($text, $line, $project, $project_stamp);
+  
+  open(FILE, "<$done_projects_file"); $text = <FILE>; close(FILE);
+  foreach $line (split ("\n", $text) ){
+    next unless ($line =~ /^(.*?)$sep(.*?)$sep/);
+
+    $project = $1; $project_stamp = $2;
+    $project_stamps->{$project} = $project_stamp;
+  }
+
+}
+
 sub strip_cat {
-  my $subject_category = shift;
-  my $subject_sans_cat = $subject_category; $subject_sans_cat =~ s/^\Q$Category\E:(.*?) \Q$By_quality\E/$1/g;
-  return $subject_sans_cat;
+  my $project_category = shift;
+  my $project_sans_cat = $project_category; $project_sans_cat =~ s/^\Q$Category\E:(.*?) \Q$By_quality\E/$1/g;
+  return $project_sans_cat;
 }
 
 sub arttalk {
