@@ -1588,15 +1588,20 @@ sub mark_project_as_done {
 sub decide_order_of_running_projects {
   
   my ($projects, $done_projects_file, $sep) = @_;
-  my (%project_stamps, $project, $ten_days, $cur_time, %cur_project_stamps);
+  my (%project_stamps, $project, $ten_days, $cur_time, %cur_project_stamps, $count);
 
   &read_done_projects($done_projects_file, \%project_stamps, $sep);
 
   # Mark projects that were never done as very old, so that they are done first
   $cur_time = time();
   $ten_days = 10*24*60*60;
+  $count = 0;
   foreach $project (@$projects){
-    $project_stamps{$project} = $cur_time - $ten_days unless (exists $project_stamps{$project});
+    
+    $project_stamps{$project} = $cur_time - $ten_days + $count
+       unless (exists $project_stamps{$project});
+
+    $count++; # try to keep current order as much as possible
   }
 
   # Associate with each of @$projects its datestamp
