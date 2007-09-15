@@ -12,6 +12,7 @@ require 'bin/fetch_articles_cats.pl';
 require 'bin/html_encode_decode_string.pl';
 require 'bin/get_html.pl';
 require 'bin/language_definitions.pl';
+require 'bin/rm_extra_html.pl';
 
 undef $/;		      # undefines the separator. Can read one whole file in one scalar.
 
@@ -1395,7 +1396,10 @@ sub run_history_query {
   
   print "Fetching $link<br>\n";
   ($text, $error) = &get_html($link);
-  print "sleep $Sleep_fetch<br>\n"; sleep $Sleep_fetch;
+  $text = &rm_extra_html($text);
+
+  print "sleep $Sleep_fetch<br>\n"; 
+  sleep $Sleep_fetch;
 
   @entries= split ("(?=\\[title\\])", $text);
   foreach $entry (@entries){
