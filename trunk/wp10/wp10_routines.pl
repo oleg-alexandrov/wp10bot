@@ -516,13 +516,6 @@ sub compare_merge_and_log_diffs {
   $sep = ' ;; ';
   $old_ids_on_disk = {}; # empty hash for now
 
-  # Attempt to create $Storage_dir where the bot will keep its stuff. Complain if fail. 
-  mkdir $Storage_dir unless (-e $Storage_dir);
-  if (! -e $Storage_dir){
-    print "Directory $Storage_dir needed by the bot does not exist!!! Exiting.\n";
-    exit(0);
-  }
-  
   $old_ids_file_name = &list_name_to_file_name ($list_name);
   &read_old_ids_from_disk ($old_ids_on_disk, $old_ids_file_name, $sep);
   
@@ -658,7 +651,8 @@ sub compare_merge_and_log_diffs {
   # fill in the most recent history link for articles which are new or changed the assessment for the better
   &most_recent_history_links_query ($new_arts, $latest_old_ids);
 
-  # and write to disk the old_ids, that info may be used if articles together
+  # Merge info from $new_arts to $old_ids_on_disk, and write to disk.
+  # That info may be used if articles together
   # with the old_ids vanish from Wikipedia lists
   # in the next few days due to bot or server problems
   &write_old_ids_on_disk($new_arts, $old_ids_on_disk, $old_ids_file_name, $sep);
@@ -1479,7 +1473,7 @@ sub read_old_ids_from_disk {
 sub write_old_ids_on_disk {
 
   my ($new_arts, $old_ids_on_disk, $list_name, $old_ids_file_name, $sep, $current_time_stamp, $article);
-  my ($number_of_days, $seconds, $link, $command);
+  my ($number_of_days, $two_weeks, $link, $command);
 
   ($new_arts, $old_ids_on_disk, $old_ids_file_name, $sep) = @_;
 
@@ -1503,19 +1497,31 @@ sub write_old_ids_on_disk {
     $old_ids_on_disk->{$article}->{'time_stamp'} = $current_time_stamp;
   }
 
+  # Attempt to create $Storage_dir where the bot will write the old_ids. Complain if fail.
+  mkdir $Storage_dir unless (-e $Storage_dir);
+  if (! -e $Storage_dir){
+    print "Directory $Storage_dir needed by the bot does not exist!!! Exiting.\n";
+    exit(0);
+  }
+  
   # write to disk the updated old ids
   # do not write those old_ids with a time stamp older than $number_of_days
-  $number_of_days = 15; 
-  $seconds = 60*60*24*$number_of_days;
+  $number_of_days = 14; 
+  $two_weeks = 60*60*24*$number_of_days;
 
   open(REV_WRITE_FILE, ">$old_ids_file_name");
-  print REV_WRITE_FILE "# Data in the order article, quality, date, old_id, time stamp in seconds, with '$sep' as separator\n";
+  print REV_WRITE_FILE "# Data in the order article, quality, date, old_id, time stamp in seconds, "
+     . "with '$sep' as separator\n";
   
   foreach $article (sort {$a cmp $b} keys %$old_ids_on_disk){
 
-    # do not write the old_ids with a time stamp older than $number_of_days
-    ## !!!!!!!!!!!!!!!!! Test the feature below!!!!!!!!!!!!
-    next if ($old_ids_on_disk->{$article}->{'time_stamp'} < $current_time_stamp - $seconds);
+    # Do not write the old_ids with a time stamp older than $number_of_days.
+    # Those are no longer currently in the list, and if they are not there for $number_of_days
+    # then it is time to ditch them. 
+    if ($old_ids_on_disk->{$article}->{'time_stamp'} < $current_time_stamp - $two_weeks){
+      print "Note: Bypassing '$article' as its timestamp is too old!\n";
+      next;
+    }
     
     print REV_WRITE_FILE $article
        . $sep . $old_ids_on_disk->{$article}->{'quality'}
