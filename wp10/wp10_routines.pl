@@ -88,6 +88,11 @@ my $Attempts     = 1000;
 my $Bot_name = 'WP 1.0 bot';
 my $Editor;
 
+# A directory where the bot will store a list of all assessed articles together with their
+# ratings and revision ids. This is needed for backup purposes and to calculate the statistics.
+# Create this directory or else the bot will refuse to run.
+my $Storage_dir = "/tmp/wp10/"; 
+
 sub main_wp10_routine {
   
   my (@projects, @articles, $text, $file, $project_category, $edit_summary);
@@ -501,7 +506,7 @@ sub collect_new_from_categories {
 sub compare_merge_and_log_diffs {
 
   my ($date, $list_name, $project_category, $old_arts, $new_arts, $version_hash) =@_;
-  my ($log_text, $line, $art, $article, $latest_old_ids, $sep, $old_ids_on_disk, $old_ids_file_name, $text, $new_name, $dir);
+  my ($log_text, $line, $art, $article, $latest_old_ids, $sep, $old_ids_on_disk, $old_ids_file_name, $text, $new_name);
 
   # the big loop to collect the data and the logs
   $log_text="===$date===\n";
@@ -511,16 +516,14 @@ sub compare_merge_and_log_diffs {
   $sep = ' ;; ';
   $old_ids_on_disk = {}; # empty hash for now
 
-  # Create the old_ids file name. This code for $old_ids_file_name  will need some work. 
-  $dir = "/tmp/wp10/"; # will store here the file
-  mkdir $dir unless (-e $dir);
-  $old_ids_file_name = $list_name; 
-  $old_ids_file_name =~ s/^.*\///g;
-  $old_ids_file_name = &html_encode_string ($old_ids_file_name); # this may convert slashes (/) to stuff like %22.
-  $old_ids_file_name = $dir . $old_ids_file_name;
-  $old_ids_file_name =~ s/\.wiki$//g; 
-  $old_ids_file_name = $old_ids_file_name . "_old_ids";
-
+  # Attempt to create $Storage_dir where the bot will keep its stuff. Complain if fail. 
+  mkdir $Storage_dir unless (-e $Storage_dir);
+  if (! -e $Storage_dir){
+    print "Directory $Storage_dir needed by the bot does not exist!!! Exiting.\n";
+    exit(0);
+  }
+  
+  $old_ids_file_name = &list_name_to_file_name ($list_name);
   &read_old_ids_from_disk ($old_ids_on_disk, $old_ids_file_name, $sep);
   
   # identify entries which were removed from categories (entries in $old_arts which are not in $new_arts)
@@ -662,6 +665,24 @@ sub compare_merge_and_log_diffs {
 
   return $log_text;
 }
+
+# Create the name of a file where will store information. See the top of the code for why.
+sub list_name_to_file_name {
+
+  my $file_name = shift;
+  
+  $file_name =~ s/^.*\///g;
+  
+  # html_encode_decode string, among other things, converts slashes (/) to stuff like %22.
+  # This avoids the creation of a subdirectory
+  $file_name = &html_encode_string ($file_name);
+
+  $file_name = $Storage_dir . $file_name;
+  $file_name =~ s/\.wiki$//g; 
+  $file_name = $file_name . "_old_ids";
+
+  return $file_name;
+}  
 
 sub split_into_subpages_maybe_and_submit {
   my ($global_count, @count, $subpage_no, $subpage_file, @lines, $line, $subpage_frontmatter, @subpages);
