@@ -576,33 +576,35 @@ sub compare_merge_and_log_diffs {
     # Found a new article. deal with its old_id, and record its appearance in the log
     if (! exists $old_arts->{$article}) {
 
-      # if the old_id of the current article exists on disk, it means that the current article is not truly new,
-      # it was in the list in the last few days and then it vanished for some reason (bot or server problems)
-      # so recover its hist_link and date from its old_id stored on disk
-      # assuming that its quality did not change in between
+      # If the old_id of the current article exists on disk, it means that the current
+      # article is not truly new, it was in the list in the last few days and then
+      # it vanished for some reason (bot or server problems).
+      # So recover its hist_link and date from its old_id stored on disk
+      # assuming that its quality did not change in between.
       
-      if ( ( exists $old_ids_on_disk->{$article}->{'old_id'} )
-	   && ($old_ids_on_disk->{$article}->{'quality'} eq $new_arts->{$article}->{'quality'} ) ){
+      if (  exists $old_ids_on_disk->{$article}->{'old_id'} 
+	   && $old_ids_on_disk->{$article}->{'quality'} eq $new_arts->{$article}->{'quality'} ){
 
-	# the hist_link is obtained from old_id by completing the URL
-	$new_arts->{$article}->{'hist_link'} =
-	   &old_id_to_hist_link ($old_ids_on_disk->{$article}->{'old_id'}, $article);
-	
-	# and copy the date too
-	$new_arts->{$article}->{'date'} = $old_ids_on_disk->{$article}->{'date'};
-	
+        # the hist_link is obtained from old_id by completing the URL
+        $new_arts->{$article}->{'hist_link'} =
+           &old_id_to_hist_link ($old_ids_on_disk->{$article}->{'old_id'}, $article);
+        
+        # and copy the date too
+        $new_arts->{$article}->{'date'} = $old_ids_on_disk->{$article}->{'date'};
+        
       }else{
-	# If the new article is truly new, we need to do a query to get its hist_link. Do it later
-	# for a chunck of articles at once, it is faster that way. So, add it in the pipeline $latest_old_ids
-	$latest_old_ids->{$article} = ""; 
+        # If the new article is truly new, we need to do a query to get its hist_link.
+        # Do it later for a chunck of articles at once, it is faster that way.
+        # So, add it in the pipeline $latest_old_ids
+        $latest_old_ids->{$article} = "";
       }
-
+      
       # Note in the log that the article was added
       $line = "\* " . &arttalk($new_arts->{$article}) . " added.\n";
       $log_text = $log_text . $line;
       next;
     }
-
+    
     # From here on we assume that the article is not new, but its info may have changed.
     # Copy as much as possible from $old_arts and update some things.
 
@@ -1440,19 +1442,13 @@ sub read_old_ids_from_disk {
   
   ($old_ids_on_disk, $old_ids_file_name, $sep) = @_;
 
-  # On en.wikipedia I use bzip2 to zip files. This won't work for scripts ran on Windows
-  if ($Lang eq 'en'){
-    if (-e "$old_ids_file_name.bz2" ){
-      $command = "bunzip2 -fv \"$old_ids_file_name.bz2\"";
-      print "$command" . "\n";
-      print `$command` . "\n";
-      print "sleep 2\n"; sleep 2; 
-    }
-  }
-  
+  &uncompress_file_maybe($old_ids_file_name);
+
   # read from disk
   if (-e "$old_ids_file_name" ){
-    open(REV_READ_FILE, "<$old_ids_file_name"); @lines = split ("\n", <REV_READ_FILE>); close(REV_READ_FILE);
+    open(REV_READ_FILE, "<$old_ids_file_name");
+    @lines = split ("\n", <REV_READ_FILE>);
+    close(REV_READ_FILE);
   }
   
   # get the data into the $old_ids_on_disk hash
@@ -1531,14 +1527,45 @@ sub write_old_ids_on_disk {
        . "\n";
   }
   close(REV_WRITE_FILE);
-  print "sleep 2\n"; sleep 2; # let the filesever have time to think
+
+  &compress_file_maybe($old_ids_file_name);
+}
+
   
-  # compress, to save space, but this won't work on Windows
+# On en.wikipedia I use bzip2 to zip files. This won't work for scripts ran on Windows
+sub uncompress_file_maybe {
+
+  my ($old_ids_file_name, $command);
+  
+  $old_ids_file_name = shift;
+  
   if ($Lang eq 'en'){
-    $command = "bzip2 -fv \"$old_ids_file_name\"";
+
+    $command = "bunzip2 -fv \"$old_ids_file_name.bz2\"";
+    
+    print "sleep 2\n"; sleep 2; # let the filesever have time to think
     print "$command" . "\n";
     print `$command` . "\n";
-    sleep 2;
+    print "sleep 2\n"; sleep 2; 
+  }
+}
+
+# Opposite of the above. This and the above may need merging into one function
+# to avoid code repetition. 
+sub compress_file_maybe {
+  
+  my ($old_ids_file_name, $command);
+  
+  $old_ids_file_name = shift;
+  
+  if ($Lang eq 'en'){
+
+    $command = "bzip2 -fv \"$old_ids_file_name\"";
+
+    print "sleep 2\n"; sleep 2; # let the filesever have time to think
+    print "$command" . "\n";
+    print `$command` . "\n";
+    print "sleep 2\n"; sleep 2; 
   }
 }
 
