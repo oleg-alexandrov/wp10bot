@@ -31,7 +31,8 @@ my $WP           = $Dictionary{'WP'};
 my $Wiki_http    = 'http://' . $Lang . '.wikipedia.org';
 
 # More language specific stuff. These are keywords for this particular Wikipedia 1.0 script
-# that's why they are not in the module "bin/language_definitions.pl" which is only for general keywords
+# that's why they are not in the module "bin/language_definitions.pl"
+# which is only for general keywords
 
 # all the categories the bot will search will be subcategories of the the category below
 my $Root_category= $Category . ':' . $Wikipedia . ' 1.0 assessments'; 
@@ -93,13 +94,15 @@ my $Editor;
 # Create this directory or else the bot will refuse to run.
 my $Storage_dir = "/tmp/wp10/"; 
 
+my $Separator = ' -;;- '; # Used to separate fields in lines in many places
+
 sub main_wp10_routine {
   
   my (@projects, @articles, $text, $file, $project_category, $edit_summary);
   my (%old_arts, %new_arts, $art, %wikiprojects, $art_name, $date, $dir, %stats, %logs, %lists);
   my (@breakpoints, $todays_log, $front_matter, %repeats, %version_hash);
   my ($run_one_project_only, %map_qual_imp_to_cats, $stats_file);
-  my (%project_stats, %global_stats, $done_projects_file, $sep);
+  my (%project_stats, %global_stats, $done_projects_file);
   
   # go to the working directory
   $dir=$0; $dir =~ s/\/[^\/]*$/\//g; chdir $dir;
@@ -119,8 +122,8 @@ sub main_wp10_routine {
   &update_index(\@projects, \%lists, \%logs, \%stats, \%wikiprojects, $date);
 
   # Go through @projects in the order of projects not done for a while get done first
-  $done_projects_file='Done_projects.txt'; $sep = ' -;;- ';
-  &decide_order_of_running_projects(\@projects, $done_projects_file, $sep);
+  $done_projects_file='Done_projects.txt'; 
+  &decide_order_of_running_projects(\@projects, $done_projects_file);
      
   if ($Lang eq 'en'){
     # need this because the biography project takes much, much more time than others
@@ -172,7 +175,7 @@ sub main_wp10_routine {
 
     &process_submit_log($logs{$project_category}, $todays_log, $project_category, $date);
 
-    &mark_project_as_done($project_category, $done_projects_file, $sep);
+    &mark_project_as_done($project_category, $done_projects_file);
   }
 
   # don't compute the total stats if the script was called just for one project
@@ -182,8 +185,9 @@ sub main_wp10_routine {
   $stats_file = $Editorial_team . '/' . $Statistics . '.wiki';
   &submit_global_stats ($stats_file, \%global_stats, $date, $All_projects);
 
-  # Make Category:FA-Class physics articles a subcat in Category:FA-Class articles if not there yet, and so on.
-  # Only in the English Wikipedia (this function is not that necessary and will be hard to adapt to non-English)
+  # Make Category:FA-Class physics articles a subcat in Category:FA-Class articles
+  # if not there yet, and so on. Do this only in the English Wikipedia
+  # (this function is not that necessary and will be hard to adapt to non-English)
   if ($Lang eq 'en'){
     &extra_categorizations();
   }
@@ -681,55 +685,71 @@ sub list_name_to_file_name {
 }  
 
 sub split_into_subpages_maybe_and_submit {
-  my ($global_count, @count, $subpage_no, $subpage_file, @lines, $line, $subpage_frontmatter, @subpages);
+  my ($global_count, @count, $subpage_no, $subpage_file, @lines, $line);
+  my ($subpage_frontmatter, @subpages, $re_login_flag, $edit_sum);
   my ($max_pagesize, $min_pagesize, $name, $mx, $mn, $base_page, $i, $iplus, $text);
-  my ($file, $project_category, $front_matter, $wikiproject, $date, $breakpoints, $new_arts)=@_;
+  my ($file, $project_category, $front_matter, $wikiproject, $date, $breakpoints,
+      $new_arts)=@_;
 
   $max_pagesize=500; $min_pagesize=400;
   $base_page=$file; $base_page =~ s/\.wiki//g;
-  $front_matter=&print_main_front_matter () if (!$front_matter || $front_matter =~ /^\s*$/);
+  $front_matter=&print_main_front_matter() if (!$front_matter || $front_matter =~ /^\s*$/);
   
   # lots of things to initialize
   $global_count=0; $subpage_no=0; @count=(0); @subpages=(""); 
   @$breakpoints=(@$breakpoints, "", ""); # don't complain about not beining initialized
   
-  # see if to split into subpages at all, and if current breakpoints still make the pages small
+  # see if to split into subpages at all, and if current breakpoints
+  # still make the pages small
   foreach $name ( sort { &cmp_arts($new_arts->{$a}, $new_arts->{$b}) } keys %$new_arts) {
-    $line=&print_object_data ($new_arts->{$name}); # and append this entry
+
+    $line=&print_object_data ($new_arts->{$name});
 
     next unless ($line =~ /\{\{assessment\s*\|\s*page\s*=\s*\[\[.+?\]\]/);
-    $subpages[$subpage_no]=$subpages[$subpage_no] . $line; $global_count++; $count[$subpage_no]++; # increment all
+
+    $subpages[$subpage_no]=$subpages[$subpage_no] . $line;
+
+    $global_count++; $count[$subpage_no]++; # increment all
 
     if ($breakpoints->[$subpage_no] eq $name){ # reached a breakpoint, create a new subpage
       $subpage_no++; push(@subpages, ""); push(@count, 0);
     }
   }
 
+  $edit_sum = "Update for $date";
+  
   # if decided not to split into subpages, just submit the text and return 
   if ($global_count <= $max_pagesize){ #don't split into subpages
     print "Only $global_count articles. Won't split into subpages!\n";
     $text=join ("", @subpages);
     $text = $front_matter
        . &print_table_header($project_category, $wikiproject)
-	  . $text
-	     . &print_table_footer($date, $project_category)
-		. &print_current_category ($project_category);
+	   . $text
+	   . &print_table_footer($date, $project_category)
+	   . &print_current_category ($project_category);
 
     $Editor = wikipedia_login($Bot_name);  
-    wikipedia_submit($Editor, $file, "Update for $date", $text, $Attempts, $Sleep_submit);   # submit to wikipedia
+    wikipedia_submit($Editor, $file, $edit_sum, $text, $Attempts, $Sleep_submit); 
     return;
   }
 
-  # see what is the smallest number of entries in a subpage (not counting the last one which may be small)
+  # see what is the smallest number of entries in a subpage
+  # (not counting the last one which may be small)
   $mn=$min_pagesize;
   for ($i=0 ; $i <=$subpage_no-2 ; $i++){
     $mn = $count[$i] if ($mn > $count[$i]);
   }
   
-  # see if it is possible to add the last subpage to the one before it (the last subpage may be small)
-  if ($subpage_no >= 1 && $count[$subpage_no-1]+$count[$subpage_no] <= $max_pagesize){
-    $subpages[$subpage_no-1] = $subpages[$subpage_no-1] . $subpages[$subpage_no]; $subpages[$subpage_no]="";
-    $count[$subpage_no-1]    = $count[$subpage_no-1]+$count[$subpage_no];         $count[$subpage_no]=0;    
+  # see if it is possible to add the last subpage to the one before it
+  # (the last subpage may be small)
+  if ($subpage_no >= 1 && $count[$subpage_no-1] + $count[$subpage_no] <= $max_pagesize){
+
+    $subpages[$subpage_no-1] = $subpages[$subpage_no-1] . $subpages[$subpage_no];
+    $subpages[$subpage_no]="";
+
+    $count[$subpage_no-1]    = $count[$subpage_no-1]+$count[$subpage_no];
+    $count[$subpage_no]=0;    
+
     $subpage_no--;
   }
 
@@ -751,22 +771,31 @@ sub split_into_subpages_maybe_and_submit {
     foreach $name ( sort { &cmp_arts($new_arts->{$a}, $new_arts->{$b}) } keys %$new_arts) {
 
       $line=&print_object_data ($new_arts->{$name}); # and append this entry
-      $subpages[$subpage_no]=$subpages[$subpage_no] . $line; $count[$subpage_no]++; # increment all
+
+      $subpages[$subpage_no]=$subpages[$subpage_no] . $line;
+      $count[$subpage_no]++; # increment all
       
       if ($count[$subpage_no] >= $min_pagesize){ # make a new subpage
-	$subpage_no++; push(@subpages, ""); push(@count, 0);
+        $subpage_no++; push(@subpages, ""); push(@count, 0);
       }
     }
-    $subpage_no-- if ($subpages[$subpage_no] =~ /^\s*$/);     # don't let the last subpage be empty
+
+    # don't let the last subpage be empty
+    $subpage_no-- if ($subpages[$subpage_no] =~ /^\s*$/); 
   }
 
   # Generate the index, and print header and footer to subpages. Submit
   $text = $front_matter .  &print_index_header($project_category, $wikiproject);
+
+  $re_login_flag = 1;
   for ($i=0 ; $i <= $subpage_no; $i++){
+
     $iplus=$i+1;
+
     $text = $text . "\* \[\[$base_page\/" . $iplus . "\]\] \($count[$i] articles\)\n";
 
-    # print a subpage. Note in line 4 the date field is empty, to not update a page if only the date changed
+    # print a subpage. Note in line 4 the date field is empty,
+    # to not update a page if only the date changed
     my $empty_date="";
     $subpages[$i] = &print_navigation_bar($base_page, $iplus, $subpage_no+1)
                   . &print_table_header($project_category, $wikiproject)
@@ -775,16 +804,39 @@ sub split_into_subpages_maybe_and_submit {
                   . &print_navigation_bar($base_page, $iplus, $subpage_no+1);
 
     $subpage_file = $base_page . "\/" . $iplus . ".wiki";
-    $Editor = wikipedia_login($Bot_name);
-    wikipedia_submit($Editor, $subpage_file, "Update for $date", $subpages[$i], $Attempts, $Sleep_submit);
+
+    &see_if_to_re_login (\$re_login_flag, \$Editor);
+    
+    wikipedia_submit($Editor, $subpage_file, $edit_sum, $subpages[$i],
+                     $Attempts, $Sleep_submit);
 
   }
   $text = $text . &print_index_footer($date, $project_category) . &print_current_category ($project_category);
   
   # submit the index of subpages
   $Editor = wikipedia_login($Bot_name);
-  wikipedia_submit($Editor, $file, "Update for $date", $text, $Attempts, $Sleep_submit);
+  wikipedia_submit($Editor, $file, $edit_sum, $text, $Attempts, $Sleep_submit);
 
+}
+
+# pass arguments to this function only by reference
+sub see_if_to_re_login {
+
+  my ($re_login_flag, $Editor) = @_;
+
+  my $re_login_freq = 50;
+  
+  if ($$re_login_flag <= 1){ 
+
+    $$Editor = wikipedia_login($Bot_name);
+    $$re_login_flag = $re_login_freq; 
+    
+  }else{
+
+    $$re_login_flag--;
+    
+  }
+  
 }
 
 sub process_submit_log {
@@ -1022,20 +1074,19 @@ sub print_table_of_quality_importance_data{
   return $text;
 }
 
-######## The function below, extra_categorizations will not be called outside English Wikipedia ##########
+# The function below, extra_categorizations will not be called outside English Wikipedia
 # It will be a pain to translate it to other languages. It is not that important either.
-# It put things like [[Category:GA-Class Aztec articles]] into [[Category:GA-Class articles]].
+# It puts [[Category:GA-Class Aztec articles]] into [[Category:GA-Class articles]], etc.
 # Save this action to disk.
 sub extra_categorizations {
 
   my (@projects, @articles, $text, $project_category, $line, $cats_file, $file);
-  my (%map, @imp_cats, @cats, $cat, $sep, $type, $edit_summary, $trunc_cat);
+  my (%map, @imp_cats, @cats, $cat, $type, $edit_summary, $trunc_cat);
 
-  $sep='------'; 
   $cats_file="Categorized_already.txt";
   open(FILE, "<$cats_file"); $text = <FILE>; close(FILE);
   foreach $line ( split ("\n", $text) ){
-    next unless ($line =~ /^(.*?)$sep(.*?)$/);
+    next unless ($line =~ /^(.*?)$Separator(.*?)$/);
     $map{$1}=$2;
   }
   
@@ -1079,7 +1130,7 @@ sub extra_categorizations {
   }
 
   open(FILE, ">$cats_file");
-  foreach $line (sort {$a cmp $b} keys %map){ print FILE "$line$sep$map{$line}\n";  }
+  foreach $line (sort {$a cmp $b} keys %map){ print FILE "$line$Separator$map{$line}\n";  }
   close(FILE);
 }
 
@@ -1622,10 +1673,10 @@ sub hist_link_to_article_name {
 
 sub mark_project_as_done {
 
-  my ($current_project, $done_projects_file, $sep) = @_;
+  my ($current_project, $done_projects_file) = @_;
   my (%project_stamps, $text, $line, $project, $project_stamp);
 
-  &read_done_projects($done_projects_file, \%project_stamps, $sep);
+  &read_done_projects($done_projects_file, \%project_stamps);
 
   # Mark the current project with the current time
   $project_stamps{$current_project} = time();
@@ -1637,7 +1688,7 @@ sub mark_project_as_done {
     $project_stamp = $project_stamps{$project};
 
     # Also print the human-readable gmtime()
-    print FILE $project . $sep . $project_stamp . $sep . gmtime($project_stamp) . "\n";
+    print FILE $project . $Separator . $project_stamp . $Separator . gmtime($project_stamp) . "\n";
   }
   close(FILE);
 
@@ -1645,10 +1696,10 @@ sub mark_project_as_done {
 
 sub decide_order_of_running_projects {
   
-  my ($projects, $done_projects_file, $sep) = @_;
+  my ($projects, $done_projects_file) = @_;
   my (%project_stamps, $project, $ten_days, $cur_time, %cur_project_stamps, $count);
 
-  &read_done_projects($done_projects_file, \%project_stamps, $sep);
+  &read_done_projects($done_projects_file, \%project_stamps);
 
   # Mark projects that were never done as very old, so that they are done first
   $cur_time = time();
@@ -1680,12 +1731,12 @@ sub decide_order_of_running_projects {
 
 sub read_done_projects {
 
-  my ($done_projects_file, $project_stamps, $sep) = @_;
+  my ($done_projects_file, $project_stamps) = @_;
   my ($text, $line, $project, $project_stamp);
   
   open(FILE, "<$done_projects_file"); $text = <FILE>; close(FILE);
   foreach $line (split ("\n", $text) ){
-    next unless ($line =~ /^(.*?)$sep(.*?)$sep/);
+    next unless ($line =~ /^(.*?)$Separator(.*?)$Separator/);
 
     $project = $1; $project_stamp = $2;
     $project_stamps->{$project} = $project_stamp;
