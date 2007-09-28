@@ -133,7 +133,8 @@ sub main_wp10_routine {
   # go through a few categories containing version information (optional)
   &read_version (\%version_hash);
 
-  # go through all projects, search the categories in there, and merge with existing information
+  # go through all projects, search the categories in there,
+  # and merge with existing information
   foreach $project_category (@projects) {
 
     # if told to run just one project, ignore the others
@@ -142,7 +143,8 @@ sub main_wp10_routine {
     # log in for each project (this should not be necessary but sometimes the bot oddly logs out)
     $Editor = wikipedia_login($Bot_name);
 
-    # a hack, which is not that necessary
+    # Exist if for some reason the routine reading categories fails.
+    # It is a hack basically. 
     if ($Lang eq 'en'){
       &check_for_errors_reading_cats();
     }
@@ -153,9 +155,11 @@ sub main_wp10_routine {
     &extract_assessments ($project_category, $text, \%old_arts); 
 
     # Collect new articles from categories, in %new_arts.
-    &collect_new_from_categories ($project_category, $date, \%new_arts, \%map_qual_imp_to_cats); 
+    &collect_new_from_categories ($project_category, $date, \%new_arts,
+                                  \%map_qual_imp_to_cats); 
 
-    # Do some counting and print the results in a table. Counting must happen before merging below,
+    # Do some counting and print the results in a table.
+    # Counting must happen before merging below,
     # as there unassessed biography articles will be removed.
     $file=$stats{$project_category};
     &count_articles_by_quality_importance(\%new_arts, \%project_stats, \%global_stats, \%repeats);
@@ -559,7 +563,7 @@ sub compare_merge_and_log_diffs {
   }
   
   # identify entries which were added, copy some info from old to new, and log all changes
-  foreach $article ( sort { &cmp_arts($new_arts->{$a}, $new_arts->{$b}) } keys %$new_arts) {
+  foreach $article ( sort { &cmp_arts($new_arts->{$a}, $new_arts->{$b}) } keys %$new_arts){
 
     # a dirty trick needed only on the English Wikipedia
     if ($Lang eq 'en'){
@@ -947,6 +951,29 @@ sub count_articles_by_quality_importance {
   }
 }
 
+
+sub do_global_stats_by_reading_from_disk {
+
+  my ($projects, $project_category, $lists, $sep, $old_ids_file_name, $list_name);
+  my ($old_ids_on_disk);
+  
+  ($projects, $lists)= @_;
+
+  $sep = ' ;; '; # this local sep thing will have to go!!!
+
+  foreach $project_category (@$projects) {
+
+    $list_name = $lists->{$project_category};
+
+    $old_ids_on_disk = {}; # empty hash for now
+  
+    $old_ids_file_name = &list_name_to_file_name ($list_name);
+    &read_old_ids_from_disk ($old_ids_on_disk, $old_ids_file_name, $sep);
+
+    # The previous routine had to uncompress $old_ids_on_disk. Compress back.
+    &compress_file_maybe($old_ids_file_name);
+  }
+}
 
 # Category:Mathematics is always guaranteed to have subcategories and articls. If none are found, we have a problem
 # This is is disabled on other language Wikipedias as not so essential
