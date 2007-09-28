@@ -514,50 +514,57 @@ sub collect_new_from_categories {
 sub compare_merge_and_log_diffs {
 
   my ($date, $list_name, $project_category, $old_arts, $new_arts, $version_hash) =@_;
-  my ($log_text, $line, $art, $article, $latest_old_ids, $sep, $old_ids_on_disk, $old_ids_file_name, $text, $new_name);
+  my ($log_text, $line, $art, $article, $latest_old_ids, $sep, $old_ids_on_disk);
+  my ($old_ids_file_name, $text, $new_name);
 
   # the big loop to collect the data and the logs
   $log_text="===$date===\n";
 
-  # read old_ids from disk. That info also exists in the Wikipedia lists themselves, but if the bot misbehaved
-  # or if the server had problems, or if there was vandalism, all in the last few days, it may have been lost. 
+  # Read old_ids from disk. That info also exists in the Wikipedia lists themselves,
+  # but if the bot misbehaved or if the server had problems, or if there was vandalism,
+  # all in the last few days, it may have been lost. 
   $sep = ' ;; ';
   $old_ids_on_disk = {}; # empty hash for now
 
   $old_ids_file_name = &list_name_to_file_name ($list_name);
   &read_old_ids_from_disk ($old_ids_on_disk, $old_ids_file_name, $sep);
   
-  # identify entries which were removed from categories (entries in $old_arts which are not in $new_arts)
+  # identify entries which were removed from categories
+  # (entries in $old_arts which are not in $new_arts)
   foreach $article ( sort { &cmp_arts($old_arts->{$a}, $old_arts->{$b}) } keys %$old_arts) {
     if (! exists $new_arts->{$article}) {
 
-      # see if perhaps the article got moved, in that case, transfer the info and note this in the log
+      # see if perhaps the article got moved, in that case,
+      # transfer the info and note this in the log
       $new_name = &hist_link_to_article_name ($old_arts->{$article}->{'hist_link'});
 
       if ($new_name !~ /^\s*$/ && ( !exists $old_arts->{$new_name} ) && ( exists $new_arts->{$new_name}) ){
-
-	# so, it appears indeed that the article got moved
-
-	# Pretend that $new_name exited before, so that
-	# later the info of $old_arts->{$article} may be copied to $new_arts->{$new_name}
-	$old_arts->{$new_name} = $old_arts->{$article};
-
-	# replace the title in the hist_link (this has no effect on the validity of the hist_link,
-	# it looks better to humans though)
-	if ($old_arts->{$new_name}->{'hist_link'} =~ /^(.*?\/w\/index\.php\?title=).*?(\&oldid=.*?)$/i) {
-	  $old_arts->{$new_name}->{'hist_link'} =  $1 .  &html_encode_string ($new_name) . $2;
-	}
-
-	#note the move in the log
-	$line = "\* '''" . &arttalk ($old_arts->{$article})
-	   . " renamed to \[\[" . $new_name . "\]\]'''\n";
-	$log_text = $log_text . $line;
-
+        
+        # so, it appears indeed that the article got moved
+        
+        # Pretend that $new_name exited before, so that later the info
+        # of $old_arts->{$article} may be copied to $new_arts->{$new_name}
+        $old_arts->{$new_name} = $old_arts->{$article};
+        
+        # replace the title in the hist_link (this has no effect on the validity
+        # of the hist_link, it looks better to humans though)
+        if ($old_arts->{$new_name}->{'hist_link'}
+            =~ /^(.*?\/w\/index\.php\?title=).*?(\&oldid=.*?)$/i) {
+          
+          $old_arts->{$new_name}->{'hist_link'}
+             =  $1 .  &html_encode_string ($new_name) . $2;
+        }
+        
+        #note the move in the log
+        $line = "\* '''" . &arttalk ($old_arts->{$article})
+           . " renamed to \[\[" . $new_name . "\]\]'''\n";
+        $log_text = $log_text . $line;
+        
       }else{
 
-	# so it was not a move, but a plain removal
-	$line = "\* '''" . &arttalk ($old_arts->{$article}) . " removed.'''\n";
-	$log_text = $log_text . $line; 
+        # So it was not a move, but a plain removal. Record that in the log.
+        $line = "\* '''" . &arttalk ($old_arts->{$article}) . " removed.'''\n";
+        $log_text = $log_text . $line; 
       }
     }
   }
@@ -568,18 +575,19 @@ sub compare_merge_and_log_diffs {
     # a dirty trick needed only on the English Wikipedia
     if ($Lang eq 'en'){
 
-      # this is making the code a bit more complicated, but is necessary. Count (done already), but do not list
-      # unassessed biography articles, as they are just too many (200,000).
-
+      # This is making the code a bit more complicated, but is necessary.
+      # Count (done already), but do not list unassessed biography articles,
+      # as they are just too many (over 400,000).
       if ($project_category eq "Category:Biography articles by quality"
-	  && $new_arts->{$article}->{'quality'} eq $Unassessed_Class){
-	delete $new_arts->{$article};
-	next;
+          && $new_arts->{$article}->{'quality'} eq $Unassessed_Class){
+        delete $new_arts->{$article};
+        next;
       }
     }
     
     # add version information (0.5, 0.5 nom, 1.0, or 1.0 nom)
-    $new_arts->{$article}->{'version'} = $version_hash->{$article} if (exists $version_hash->{$article});
+    $new_arts->{$article}->{'version'} = $version_hash->{$article}
+       if (exists $version_hash->{$article});
 
     # Found a new article. deal with its old_id, and record its appearance in the log
     if (! exists $old_arts->{$article}) {
@@ -912,24 +920,30 @@ sub truncate_log {
 }
 
 sub count_articles_by_quality_importance {
-  my ($article, $imp);
+  my ($article, $qual, $imp);
   my ($articles, $project_stats, $global_stats, $repeats)=@_;
 
-  %$project_stats = (); # blank this
+  # blank this
+  %$project_stats = ();
+
+  # count by quality and importance
   foreach $article (keys %$articles){
 
-    $project_stats->{$articles->{$article}->{'quality'}}->{$articles->{$article}->{'importance'}}++;
-    $project_stats->{$Total}->{$articles->{$article}->{'importance'}}++;
-    $project_stats->{$articles->{$article}->{'quality'}}->{$Total}++;
+    $qual = $articles->{$article}->{'quality'};
+    $imp = $articles->{$article}->{'importance'};
+  
+    $project_stats->{$qual}->{$imp}++;
+    $project_stats->{$Total}->{$imp}++;
+    $project_stats->{$qual}->{$Total}++;
     $project_stats->{$Total}->{$Total}++;
     
     # when doing the global counting, make sure don't count each article more than once. 
     next if (exists $repeats->{$article});
     $repeats->{$article}=1; 
 
-    $global_stats->{$articles->{$article}->{'quality'}}->{$articles->{$article}->{'importance'}}++;
-    $global_stats->{$Total}->{$articles->{$article}->{'importance'}}++;
-    $global_stats->{$articles->{$article}->{'quality'}}->{$Total}++;
+    $global_stats->{$qual}->{$imp}++;
+    $global_stats->{$Total}->{$imp}++;
+    $global_stats->{$qual}->{$Total}++;
     $global_stats->{$Total}->{$Total}++;
   }
 
@@ -937,14 +951,20 @@ sub count_articles_by_quality_importance {
   foreach $imp ( (sort {$Importance{$a} <=> $Importance{$b} } keys %Importance), $Total){
 
     # first make sure that subtraction is well-defined
-    $project_stats->{$Total}->{$imp} = 0 unless (exists $project_stats->{$Total}->{$imp});
-    $project_stats->{$Unassessed_Class}->{$imp} = 0 unless (exists $project_stats->{$Unassessed_Class}->{$imp});
-    
+    $project_stats->{$Total}->{$imp} = 0
+       unless (exists $project_stats->{$Total}->{$imp});
+    $project_stats->{$Unassessed_Class}->{$imp} = 0
+       unless (exists $project_stats->{$Unassessed_Class}->{$imp});
+
+    # do the subtraction
     $project_stats->{$Assessed_Class}->{$imp}
        = $project_stats->{$Total}->{$imp} - $project_stats->{$Unassessed_Class}->{$imp} ;
-    
-    $global_stats->{$Total}->{$imp} = 0 unless (exists $global_stats->{$Total}->{$imp});
-    $global_stats->{$Unassessed_Class}->{$imp} = 0 unless (exists $global_stats->{$Unassessed_Class}->{$imp});
+
+    # same for global stats
+    $global_stats->{$Total}->{$imp} = 0
+       unless (exists $global_stats->{$Total}->{$imp});
+    $global_stats->{$Unassessed_Class}->{$imp} = 0
+       unless (exists $global_stats->{$Unassessed_Class}->{$imp});
 
     $global_stats->{$Assessed_Class}->{$imp}
        = $global_stats->{$Total}->{$imp} - $global_stats->{$Unassessed_Class}->{$imp} ;
