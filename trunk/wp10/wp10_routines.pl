@@ -90,11 +90,24 @@ my $Bot_name = 'WP 1.0 bot';
 my $Editor;
 
 # A directory where the bot will store a list of all assessed articles together with their
-# ratings and revision ids. This is needed for backup purposes and to calculate the statistics.
-# Create this directory or else the bot will refuse to run.
+# ratings and revision ids. This is needed for backup purposes and to calculate
+# the statistics (see more below). Create this directory or else the bot will refuse to run.
 my $Storage_dir = "/tmp/wp10/"; 
 
+# Continued from the previous paragraph, if an article went missing from the list of
+# assessed articles, keep its info for $Number_of_days. This makes it possible to recover
+# that article if the reason it went missing was because of vandalism or due to the
+# bot mal-functioning.
+my $Number_of_days = 14; 
+
+# When calculating the statistics, use the information in $Storage_dir.
+# Some of that info may refer to articles which are no longer in the current Wikipedia lists
+# (while its info is still stored locally). For that reason, ignore any of the articles
+# in $Storage_dir older than $Number_of_days_old
+$Number_of_days_old = 4; 
+
 my $Separator = ' -;;- '; # Used to separate fields in lines in many places
+
 
 sub main_wp10_routine {
   
@@ -102,7 +115,7 @@ sub main_wp10_routine {
   my (%old_arts, %new_arts, $art, %wikiprojects, $art_name, $date, $dir, %stats, %logs, %lists);
   my (@breakpoints, $todays_log, $front_matter, %repeats, %version_hash);
   my ($run_one_project_only, %map_qual_imp_to_cats, $stats_file);
-  my (%project_stats, %global_stats, $done_projects_file);
+  my (%project_stats, %global_stats, $global_flag, $done_projects_file);
   
   # go to the working directory
   $dir=$0; $dir =~ s/\/[^\/]*$/\//g; chdir $dir;
@@ -121,6 +134,9 @@ sub main_wp10_routine {
   &fetch_quality_categories(\@projects);
   &update_index(\@projects, \%lists, \%logs, \%stats, \%wikiprojects, $date);
 
+  # rm this temporary line
+  #&do_global_stats_by_reading_from_disk  (\@projects, \%lists);
+  
   # Go through @projects in the order of projects not done for a while get done first
   $done_projects_file='Done_projects.txt'; 
   &decide_order_of_running_projects(\@projects, $done_projects_file);
@@ -158,22 +174,24 @@ sub main_wp10_routine {
     &collect_new_from_categories ($project_category, $date, \%new_arts,
                                   \%map_qual_imp_to_cats); 
 
-    # Do some counting and print the results in a table.
-    # Counting must happen before merging below,
+    # Calculate the statistics and print the results in a table.
+    # The calculation must happen before merging below,
     # as there unassessed biography articles will be removed.
     $file=$stats{$project_category};
-    &count_articles_by_quality_importance(\%new_arts, \%project_stats, \%global_stats, \%repeats);
-    $text = &print_table_of_quality_importance_data($project_category, \%map_qual_imp_to_cats, \%project_stats)
+    $global_flag = 0; # Here, calc the stats for current project only, not the global stats
+    &calc_stats(\%new_arts, \%project_stats, $global_flag, \%repeats);
+    $text = &print_stats($project_category, \%map_qual_imp_to_cats, \%project_stats)
        . &print_current_category($project_category);
-
-    wikipedia_submit($Editor, $file, "$Statistics for $date", $text, $Attempts, $Sleep_submit); 
+    wikipedia_submit($Editor, $file, "$Statistics for $date", $text,
+                     $Attempts, $Sleep_submit); 
 
     # the heart of the code, compare %old_arts and %new_arts, merge some info
     # from old into new, and generate a log
     $file = $lists{$project_category};
     $todays_log = &compare_merge_and_log_diffs($date, $file, $project_category,
                                                \%old_arts, \%new_arts, \%version_hash);
-    
+
+    # Submit the collected information to update the relevant Wikipedia pages
     &split_into_subpages_maybe_and_submit ($file, $project_category, $front_matter,
              $wikiprojects{$project_category}, $date, \@breakpoints, \%new_arts);
 
@@ -219,8 +237,8 @@ sub fetch_quality_categories{
   }
 }
 
-# Create a hash of hashes containing the files the bot will write to, and some other information.
-# Keep that hash of hashes on Wikipedia as an index of projects.
+# Create a hash of hashes containing the files the bot will write to, and some
+# other information. Keep that hash of hashes on Wikipedia as an index.
 sub update_index{
  
   my ($category, $text, $file, $line, $list, $stat, $log, $short_list, $preamble, $bottom);
@@ -919,55 +937,46 @@ sub truncate_log {
   return $log;
 }
 
-sub count_articles_by_quality_importance {
+sub calc_stats {
   my ($article, $qual, $imp);
-  my ($articles, $project_stats, $global_stats, $repeats)=@_;
+  my ($articles, $stats, $global_flag, $repeats)=@_;
 
-  # blank this
-  %$project_stats = ();
+
+  # If not doing the global stats (where results for all the projects are aggregated)
+  # then blank this hash
+  %$stats = () unless ($global_flag);
 
   # count by quality and importance
   foreach $article (keys %$articles){
 
+    # When doing the global stats, make sure don't count each article more than once.
+    # This is needed since the same article can show up in many projects.
+    if ($global_flag){
+      next if (exists $repeats->{$article});
+      $repeats->{$article}=1; 
+    }
+
     $qual = $articles->{$article}->{'quality'};
     $imp = $articles->{$article}->{'importance'};
   
-    $project_stats->{$qual}->{$imp}++;
-    $project_stats->{$Total}->{$imp}++;
-    $project_stats->{$qual}->{$Total}++;
-    $project_stats->{$Total}->{$Total}++;
+    $stats->{$qual}->{$imp}++;
+    $stats->{$Total}->{$imp}++;
+    $stats->{$qual}->{$Total}++;
+    $stats->{$Total}->{$Total}++;
     
-    # when doing the global counting, make sure don't count each article more than once. 
-    next if (exists $repeats->{$article});
-    $repeats->{$article}=1; 
-
-    $global_stats->{$qual}->{$imp}++;
-    $global_stats->{$Total}->{$imp}++;
-    $global_stats->{$qual}->{$Total}++;
-    $global_stats->{$Total}->{$Total}++;
   }
 
   # subtract from the totals the unassessed articles to get the assessed articles
   foreach $imp ( (sort {$Importance{$a} <=> $Importance{$b} } keys %Importance), $Total){
 
     # first make sure that subtraction is well-defined
-    $project_stats->{$Total}->{$imp} = 0
-       unless (exists $project_stats->{$Total}->{$imp});
-    $project_stats->{$Unassessed_Class}->{$imp} = 0
-       unless (exists $project_stats->{$Unassessed_Class}->{$imp});
+    $stats->{$Total}->{$imp} = 0  unless (exists $stats->{$Total}->{$imp});
+    $stats->{$Unassessed_Class}->{$imp} = 0
+       unless (exists $stats->{$Unassessed_Class}->{$imp});
 
     # do the subtraction
-    $project_stats->{$Assessed_Class}->{$imp}
-       = $project_stats->{$Total}->{$imp} - $project_stats->{$Unassessed_Class}->{$imp} ;
-
-    # same for global stats
-    $global_stats->{$Total}->{$imp} = 0
-       unless (exists $global_stats->{$Total}->{$imp});
-    $global_stats->{$Unassessed_Class}->{$imp} = 0
-       unless (exists $global_stats->{$Unassessed_Class}->{$imp});
-
-    $global_stats->{$Assessed_Class}->{$imp}
-       = $global_stats->{$Total}->{$imp} - $global_stats->{$Unassessed_Class}->{$imp} ;
+    $stats->{$Assessed_Class}->{$imp}
+       = $stats->{$Total}->{$imp} - $stats->{$Unassessed_Class}->{$imp} ;
   }
 }
 
@@ -983,9 +992,10 @@ sub do_global_stats_by_reading_from_disk {
 
   foreach $project_category (@$projects) {
 
+    print "Now doing $project_category\n";
     $list_name = $lists->{$project_category};
 
-    $old_ids_on_disk = {}; # empty hash for now
+    $old_ids_on_disk = {}; # Empty this hash before using it.
   
     $old_ids_file_name = &list_name_to_file_name ($list_name);
     &read_old_ids_from_disk ($old_ids_on_disk, $old_ids_file_name, $sep);
@@ -993,6 +1003,8 @@ sub do_global_stats_by_reading_from_disk {
     # The previous routine had to uncompress $old_ids_on_disk. Compress back.
     &compress_file_maybe($old_ids_file_name);
   }
+
+  exit(0);
 }
 
 # Category:Mathematics is always guaranteed to have subcategories and articls. If none are found, we have a problem
@@ -1008,16 +1020,19 @@ sub check_for_errors_reading_cats {
   }	
 }
 
-sub print_table_of_quality_importance_data{
+sub print_stats{
 
-  my ($project_category, $map_qual_imp_to_cats, $project_stats) = @_;
+  my ($project_category, $map_qual_imp_to_cats, $stats) = @_;
   my ($project_sans_cat, $project_br, $text, $key, @articles, $cat, @categories);
   my ($qual, $qual_noclass, $imp, $imp_noclass, $link, @tmp);
 
-  $map_qual_imp_to_cats = ()  if ($map_qual_imp_to_cats eq ""); # needed for the global totals
+  # This has is neeeded for the global totals. For the individual projects stats
+  # make it just an empty hash.
+  $map_qual_imp_to_cats = ()  if ($map_qual_imp_to_cats eq ""); 
 
+  # insert a linebreak, to print nicer
   $project_sans_cat = &strip_cat ($project_category);
-  $project_br = $project_sans_cat; $project_br =~ s/^(.*) (.*?)$/$1\<br\>$2/g; # insert a linebreak, to print nicer
+  $project_br = $project_sans_cat; $project_br =~ s/^(.*) (.*?)$/$1\<br\>$2/g;
   
   # start printing the table. Lots of ugly wikicode here.
 
@@ -1032,7 +1047,7 @@ sub print_table_of_quality_importance_data{
   foreach $imp ( (sort {$Importance{$a} <=> $Importance{$b} } keys %Importance), $Total){
 
     # ignore blank columns in the table
-    next if ( ( !exists $project_stats->{$Total}->{$imp} ) || $project_stats->{$Total}->{$imp} == 0 );
+    next if ( ( !exists $stats->{$Total}->{$imp} ) || $stats->{$Total}->{$imp} == 0 );
 
     # $imp_noclass is $imp after stripping the '-Class' suffix
     $imp_noclass = $imp; $imp_noclass =~ s/-\Q$Class\E$//ig;
@@ -1088,25 +1103,25 @@ sub print_table_of_quality_importance_data{
     foreach $imp ( (sort {$Importance{$a} <=> $Importance{$b} } keys %Importance), $Total){
 
       # ignore blank columns in the table
-      next if ( ( !exists $project_stats->{$Total}->{$imp} ) || $project_stats->{$Total}->{$imp} == 0 );
+      next if ( ( !exists $stats->{$Total}->{$imp} ) || $stats->{$Total}->{$imp} == 0 );
       
-      if (exists $project_stats->{$qual}->{$imp}){
+      if (exists $stats->{$qual}->{$imp}){
+        
+        if ($imp eq $Total || $qual eq $Total){
+          
+          # insert the number in the cell in bold, looks nicer like that
+          $text = $text . " '''" . $stats->{$qual}->{$imp} . "''' ";
+          
+        }else{
+          
+          # the non-Total cells don't need to be bold
+          $text = $text . " " . $stats->{$qual}->{$imp} . " ";
 
-	if ($imp eq $Total || $qual eq $Total){
-
-	  # insert the number in the cell in bold, looks nicer like that
-	  $text = $text . " '''" . $project_stats->{$qual}->{$imp} . "''' ";
-	  
-	}else{
-
-	  # the non-Total cells don't need to be bold
-	  $text = $text . " " . $project_stats->{$qual}->{$imp} . " ";
-
-	}
-
+        }
+        
       }else{
-	# empty cell
-	$text = $text . " ";
+        # empty cell
+        $text = $text . " ";
       }
 
       # separation between cells
@@ -1115,7 +1130,7 @@ sub print_table_of_quality_importance_data{
     $text =~ s/\|\|\s*$//g; # strip the last cell, which will be empty
     $text = $text . "\n" . '|-' . "\n"; # start new row
   }
-
+  
   $text = $text . '|}' . "\n";              # close the table
   $text =~ s/(\Q$Total\E)/\'\'\'$1\'\'\'/g; # boldify the string "Total" in cells
   return $text;
@@ -1188,8 +1203,9 @@ sub submit_global_stats{
 
   $text=wikipedia_fetch($Editor, $stats_file, $Attempts, $Sleep_fetch);
   $text =~ s/^(.*?)($|\Q$Bot_tag\E)/$Bot_tag/s;
-  $text = &print_table_of_quality_importance_data($All_projects, "", $global_stats) . $text;
-  wikipedia_submit($Editor, $stats_file, "All stats for $date", $text, $Attempts, $Sleep_submit);
+  $text = &print_stats($All_projects, "", $global_stats) . $text;
+  wikipedia_submit($Editor, $stats_file, "All stats for $date", $text,
+                   $Attempts, $Sleep_submit);
 }
 
 
@@ -1535,8 +1551,8 @@ sub run_history_query {
 
 sub read_old_ids_from_disk {
 
-  my ($old_ids_on_disk, $old_ids_file_name, $rev_file, $line, @lines, $sep, $article, $qual, $date, $old_id);
-  my ($time_stamp, $command);
+  my ($old_ids_on_disk, $old_ids_file_name, $rev_file, $line, @lines);
+  my ($sep, $article, $qual, $date, $old_id, $time_stamp, $command);
   
   ($old_ids_on_disk, $old_ids_file_name, $sep) = @_;
 
@@ -1566,8 +1582,8 @@ sub read_old_ids_from_disk {
 
 sub write_old_ids_on_disk {
 
-  my ($new_arts, $old_ids_on_disk, $list_name, $old_ids_file_name, $sep, $current_time_stamp, $article);
-  my ($number_of_days, $two_weeks, $link, $command);
+  my ($new_arts, $old_ids_on_disk, $list_name, $old_ids_file_name, $sep);
+  my ($current_time_stamp, $article, $two_weeks, $link, $command);
 
   ($new_arts, $old_ids_on_disk, $old_ids_file_name, $sep) = @_;
 
@@ -1598,10 +1614,9 @@ sub write_old_ids_on_disk {
     exit(0);
   }
   
-  # write to disk the updated old ids
-  # do not write those old_ids with a time stamp older than $number_of_days
-  $number_of_days = 14; 
-  $two_weeks = 60*60*24*$number_of_days;
+  # Write to disk the updated old ids
+  # do not write those old_ids with a time stamp older than $Number_of_days
+  $two_weeks = 60*60*24*$Number_of_days;
 
   open(REV_WRITE_FILE, ">$old_ids_file_name");
   print REV_WRITE_FILE "# Data in the order article, quality, date, old_id, time stamp in seconds, "
@@ -1609,9 +1624,9 @@ sub write_old_ids_on_disk {
   
   foreach $article (sort {$a cmp $b} keys %$old_ids_on_disk){
 
-    # Do not write the old_ids with a time stamp older than $number_of_days.
-    # Those are no longer currently in the list, and if they are not there for $number_of_days
-    # then it is time to ditch them. 
+    # Do not write the old_ids with a time stamp older than $Number_of_days.
+    # Those are no longer currently in the list, and if they are not there
+    # for $Number_of_days, then it is time to ditch them. 
     if ($old_ids_on_disk->{$article}->{'time_stamp'} < $current_time_stamp - $two_weeks){
       print "Note: Bypassing '$article' as its timestamp is too old!\n";
       next;
