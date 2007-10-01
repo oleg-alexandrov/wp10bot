@@ -104,7 +104,7 @@ my $Number_of_days = 14;
 # Some of that info may refer to articles which are no longer in the current Wikipedia lists
 # (while its info is still stored locally). For that reason, ignore any of the articles
 # in $Storage_dir older than $Number_of_days_old
-$Number_of_days_old = 4; 
+my $Number_of_days_old = 4; 
 
 my $Separator = ' -;;- '; # Used to separate fields in lines in many places
 
