@@ -137,13 +137,6 @@ sub main_wp10_routine {
   &fetch_quality_categories(\@projects);
   &update_index(\@projects, \%lists, \%logs, \%stats, \%wikiprojects, $date);
 
-  # Move these lines down the article!
-  # Calc the global stats (reading from disk is not the only way, see inside).
-  &calc_global_stats_by_reading_from_disk  (\@projects, \%lists, \%global_stats);
-  $stats_file = $Editorial_team . '/' . $Statistics . '.wiki';
-  &submit_global_stats ($stats_file, \%global_stats, $date, $All_projects);
-  exit(0);
-  
   # Go through @projects in the order of projects not done for a while get done first
   $done_projects_file='Done_projects.txt'; 
   &decide_order_of_running_projects(\@projects, $done_projects_file);
@@ -156,8 +149,8 @@ sub main_wp10_routine {
   # go through a few categories containing version information (optional)
   &read_version (\%version_hash);
 
-  # go through all projects, search the categories in there,
-  # and merge with existing information
+  # Go through all projects, search the categories in there,
+  # and merge with existing information.
   foreach $project_category (@projects) {
 
     # if told to run just one project, ignore the others
@@ -210,10 +203,11 @@ sub main_wp10_routine {
   # don't compute the total stats if the script was called just for one project
   return if ($run_one_project_only);
 
-  # global stats
+  # Calc the global stats (reading from disk is not the only way, see inside the code below).
+  &calc_global_stats_by_reading_from_disk (\@projects, \%lists, \%global_stats);
   $stats_file = $Editorial_team . '/' . $Statistics . '.wiki';
   &submit_global_stats ($stats_file, \%global_stats, $date, $All_projects);
-
+  
   # Make Category:FA-Class physics articles a subcat in Category:FA-Class articles
   # if not there yet, and so on. Do this only in the English Wikipedia
   # (this function is not that necessary and will be hard to adapt to non-English)
@@ -506,7 +500,8 @@ sub collect_new_from_categories {
     # will need this map when counting how many articles of each type we have
     $map_qual_imp_to_cats->{$imp} = $cat;
 
-    # no point in fetching the contents of the unassessed importance categories. That's the default.
+    # No point in fetching the contents of the unassessed importance categories.
+    # That's because the articles have unassessed importance by default anyway.
     next if ($imp eq $No_Class);
 
     # collect the importance ratings
@@ -520,8 +515,10 @@ sub collect_new_from_categories {
     }
   }
   
-  # fill in the comment field, for articles which are in a category meant to show that there is a comments subpage
-  $comments_category=$project_category; $comments_category =~ s/\Q$By_quality\E/$With_comments/g;
+  # Fill in the comment field, for articles which are in a category meant
+  # to show that there is a comments subpage
+  $comments_category=$project_category;
+  $comments_category =~ s/\Q$By_quality\E/$With_comments/g;
   &fetch_articles_cats($comments_category, \@cats, \@articles); 
   
   foreach $article (@articles) {
@@ -1021,7 +1018,9 @@ sub calc_global_stats_by_reading_from_disk {
 
   foreach $project_category (@$projects) {
 
-    print "Now doing $project_category\n";
+    next unless ($project_category =~ /African diaspora/i);
+    
+    print "Now adding $project_category to global stats.\n";
     $list_name = $lists->{$project_category};
 
     $old_ids_on_disk = {}; # Empty this hash before using it.
@@ -1038,12 +1037,14 @@ sub calc_global_stats_by_reading_from_disk {
   }
 }
 
-# Category:Mathematics is always guaranteed to have subcategories and articls. If none are found, we have a problem
-# This is is disabled on other language Wikipedias as not so essential
+# Category:Mathematics is always guaranteed to have subcategories and articls.
+# If none are found, we have a problem.
+# This is is disabled on other language Wikipedias as not so essential.
 sub check_for_errors_reading_cats {
   my ($category, @cats, @articles);
   $category = $Category . ":Mathematics";
-  print "Doing some <b>debugging</b> first ... die if can't detect subcategories or articles due to changed API... <br>\n";
+  print "Doing some <b>debugging</b> first ... "
+      . "Die if can't detect subcategories or articles due to changed API... <br>\n";
   &fetch_articles_cats($category, \@cats, \@articles); 
   if ( !@cats || !@articles){
     print "Error! Can't detect subcatgories or articles!\n"; 
@@ -1185,7 +1186,8 @@ sub extra_categorizations {
   
   &fetch_articles_cats($Root_category, \@projects, \@articles); 
 
-  # go through all projects, search the categories in there, and merge with existing information
+  # Go through all projects, search the categories in there,
+  # and merge with existing information
   foreach $project_category (@projects) {
 
     if ($Lang eq 'en'){
@@ -1583,7 +1585,7 @@ sub run_history_query {
 sub read_old_ids_from_disk {
 
   my ($old_ids_on_disk, $old_ids_file_name, $rev_file, $line, @lines);
-  my ($sep, $article, $qual, $date, $old_id, $time_stamp, $command);
+  my ($sep, $article, $qual, $imp, $date, $old_id, $time_stamp, $command);
   
   ($old_ids_on_disk, $old_ids_file_name, $sep) = @_;
 
@@ -1600,10 +1602,11 @@ sub read_old_ids_from_disk {
   foreach $line (@lines){
 
     # parse the line and read the data
-    next unless ($line =~ /^(.*?)$sep(.*?)$sep(.*?)$sep(.*?)$sep(.*?)$/);
-    $article = $1; $qual = $2; $date = $3; $old_id = $4; $time_stamp = $5;
+    next unless ($line =~ /^(.*?)$sep(.*?)$sep(.*?)$sep(.*?)$sep(.*?)$sep(.*?)$/);
+    $article = $1; $qual = $2; $imp = $3; $date = $4; $old_id = $5; $time_stamp = $6;
 
     $old_ids_on_disk->{$article}->{'quality'}=$qual;
+    $old_ids_on_disk->{$article}->{'importance'}=$imp;
     $old_ids_on_disk->{$article}->{'date'}=$date;
     $old_ids_on_disk->{$article}->{'old_id'}=$old_id;
     $old_ids_on_disk->{$article}->{'time_stamp'}=$time_stamp;
@@ -1624,6 +1627,7 @@ sub write_old_ids_on_disk {
   foreach $article (keys %$new_arts){
 
     $old_ids_on_disk->{$article}->{'quality'} = $new_arts->{$article}->{'quality'};
+    $old_ids_on_disk->{$article}->{'importance'} = $new_arts->{$article}->{'importance'};
     $old_ids_on_disk->{$article}->{'date'} = $new_arts->{$article}->{'date'};
 
     # the old id is obtained from the history link by removing everything but the id
@@ -1650,7 +1654,7 @@ sub write_old_ids_on_disk {
   $seconds = 60*60*24*$Number_of_days;
 
   open(REV_WRITE_FILE, ">$old_ids_file_name");
-  print REV_WRITE_FILE "# Data in the order article, quality, date, old_id, "
+  print REV_WRITE_FILE "# Data in the order article, quality, importance, date, old_id, "
      . "time stamp in seconds, with '$sep' as separator\n";
   
   foreach $article (sort {$a cmp $b} keys %$old_ids_on_disk){
@@ -1665,6 +1669,7 @@ sub write_old_ids_on_disk {
     
     print REV_WRITE_FILE $article
        . $sep . $old_ids_on_disk->{$article}->{'quality'}
+       . $sep . $old_ids_on_disk->{$article}->{'importance'}
        . $sep . $old_ids_on_disk->{$article}->{'date'}
        . $sep . $old_ids_on_disk->{$article}->{'old_id'} 
        . $sep . $old_ids_on_disk->{$article}->{'time_stamp'}
@@ -1687,10 +1692,10 @@ sub uncompress_file_maybe {
 
     $command = "bunzip2 -fv \"$old_ids_file_name.bz2\"";
     
-    print "sleep 2\n"; sleep 2; # let the filesever have time to think
+    print "sleep 1\n"; sleep 1; # let the filesever have time to think
     print "$command" . "\n";
     print `$command` . "\n";
-    print "sleep 2\n"; sleep 2; 
+    print "sleep 1\n"; sleep 1; 
   }
 }
 
@@ -1706,10 +1711,10 @@ sub compress_file_maybe {
 
     $command = "bzip2 -fv \"$old_ids_file_name\"";
 
-    print "sleep 2\n"; sleep 2; # let the filesever have time to think
+    print "sleep 1\n"; sleep 1; # let the filesever have time to think
     print "$command" . "\n";
     print `$command` . "\n";
-    print "sleep 2\n"; sleep 2; 
+    print "sleep 1\n"; sleep 1; 
   }
 }
 
