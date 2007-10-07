@@ -1018,8 +1018,6 @@ sub calc_global_stats_by_reading_from_disk {
 
   foreach $project_category (@$projects) {
 
-    next unless ($project_category =~ /African diaspora/i);
-    
     print "Now adding $project_category to global stats.\n";
     $list_name = $lists->{$project_category};
 
