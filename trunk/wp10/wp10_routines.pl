@@ -89,22 +89,24 @@ my $Attempts     = 1000;
 my $Bot_name = 'WP 1.0 bot';
 my $Editor;
 
-# A directory where the bot will store a list of all assessed articles together with their
-# ratings and revision ids. This is needed for backup purposes and to calculate
-# the statistics (see more below). Create this directory or else the bot will refuse to run.
+# A directory on disk where the bot will store a list of all assessed
+# articles together with their ratings and revision ids. This is
+# needed for backup purposes and to calculate the statistics (see more
+# below). Create this directory or else the bot will refuse to run.
 my $Storage_dir = "/tmp/wp10/"; 
 
-# Continued from the previous paragraph, if an article went missing from the list of
-# assessed articles, keep its info for $Number_of_days. This makes it possible to recover
-# that article if the reason it went missing was because of vandalism or due to the
+# Continued from the previous paragraph, if an article went missing
+# from the list of assessed articles, keep its info on disk for
+# $Number_of_days. This makes it possible to recover that article if
+# the reason it went missing was because of vandalism or due to the
 # bot mal-functioning.
-my $Number_of_days = 14; 
+my $Number_of_days = 9; 
 
-# When calculating the statistics, use the information in $Storage_dir.
-# Some of that info may refer to articles which are no longer in the current Wikipedia lists
-# (while its info is still stored locally). For that reason, ignore any of the articles
-# in $Storage_dir older than $Number_of_days_old
-my $Number_of_days_old = 4; 
+# The information stored in $Storage_dir is used to compute the global
+# stats. As such, the stats computed this way will be a bit larger
+# than it should be, since it will also count articles which may have
+# been removed on Wikipedia in the last $Number_of_days.
+
 
 my $Separator = ' -;;- '; # Used to separate fields in lines in many places
 
@@ -112,7 +114,8 @@ my $Separator = ' -;;- '; # Used to separate fields in lines in many places
 sub main_wp10_routine {
   
   my (@projects, @articles, $text, $file, $project_category, $edit_summary);
-  my (%old_arts, %new_arts, $art, %wikiprojects, $art_name, $date, $dir, %stats, %logs, %lists);
+  my (%old_arts, %new_arts, $art, %wikiprojects, $art_name, $date, $dir);
+  my (%stats, %logs, %lists);
   my (@breakpoints, $todays_log, $front_matter, %repeats, %version_hash);
   my ($run_one_project_only, %map_qual_imp_to_cats, $stats_file);
   my (%project_stats, %global_stats, $global_flag, $done_projects_file);
@@ -134,8 +137,12 @@ sub main_wp10_routine {
   &fetch_quality_categories(\@projects);
   &update_index(\@projects, \%lists, \%logs, \%stats, \%wikiprojects, $date);
 
-  # rm this temporary line
-  #&do_global_stats_by_reading_from_disk  (\@projects, \%lists);
+  # Move these lines down the article!
+  # Calc the global stats (reading from disk is not the only way, see inside).
+  &calc_global_stats_by_reading_from_disk  (\@projects, \%lists, \%global_stats);
+  $stats_file = $Editorial_team . '/' . $Statistics . '.wiki';
+  &submit_global_stats ($stats_file, \%global_stats, $date, $All_projects);
+  exit(0);
   
   # Go through @projects in the order of projects not done for a while get done first
   $done_projects_file='Done_projects.txt'; 
@@ -156,11 +163,11 @@ sub main_wp10_routine {
     # if told to run just one project, ignore the others
     next if ($run_one_project_only && $project_category !~ /\Q$run_one_project_only\E/i);
 
-    # log in for each project (this should not be necessary but sometimes the bot oddly logs out)
+    # log in for each project (to control occasional spontaneous bot logouts)
     $Editor = wikipedia_login($Bot_name);
 
-    # Exist if for some reason the routine reading categories fails.
-    # It is a hack basically. 
+    # Exit if for some reason the routine reading categories fails.
+    # This is basically a hack.
     if ($Lang eq 'en'){
       &check_for_errors_reading_cats();
     }
@@ -304,7 +311,8 @@ sub update_index{
 
 sub read_version{
 
-  print "<font color=red>I have to read <b>all</b> version 0.5 and 1.0 articles before proceeding with your request. Be patient. </font><br><br>\n";
+  print "<font color=red>I have to read <b>all</b> version 0.5 and 1.0 "
+      . "articles before proceeding with your request. Be patient. </font><br><br>\n";
 
   my ($version_hash, %cats_hash, $cat, $subcat, @subcats, @all_subcats, $article, @articles);
   $version_hash = shift;
@@ -957,8 +965,16 @@ sub calc_stats {
     }
 
     $qual = $articles->{$article}->{'quality'};
-    $imp = $articles->{$article}->{'importance'};
-  
+
+    if (exists $articles->{$article}->{'importance'}){
+      $imp = $articles->{$article}->{'importance'};
+    }else{
+      $imp = $No_Class;
+    }
+    
+    #$old_ids_on_disk->{$article}->{'quality'} = $new_arts->{$article}->{'quality'};
+    #$old_ids_on_disk->{$article}->{'date'} = $new_arts->{$article}->{'date'};
+
     $stats->{$qual}->{$imp}++;
     $stats->{$Total}->{$imp}++;
     $stats->{$qual}->{$Total}++;
@@ -981,14 +997,27 @@ sub calc_stats {
 }
 
 
-sub do_global_stats_by_reading_from_disk {
+sub calc_global_stats_by_reading_from_disk {
 
-  my ($projects, $project_category, $lists, $sep, $old_ids_file_name, $list_name);
-  my ($old_ids_on_disk);
+  # Calculate the global stats by reading the information we saved on disk
+  # at $Storage_dir when cyclcing through the projects earlier.
+  # This consumes less memory, since we don't need to keep %repeats
+  # in memory throughout the bot run, but we can create it only at the end.
+
+  # It is very easy to make the global stats not being computed by saving to disk,
+  # which makes things a bit inaccurate (see the description of $Storage dir on top).
+  # An alternative way is to insert the lines
+  #      $global_flag = 1; # Here, calc the stats for all the articles
+  #      &calc_stats(\%new_arts, \%global_stats, $global_flag, \%repeats);
+  # right when the bot calls calc_stats for each project in the main code loop.
   
-  ($projects, $lists)= @_;
+  
+  my ($projects, $project_category, $lists, $sep, $old_ids_file_name, $list_name);
+  my ($old_ids_on_disk, $global_stats, $global_flag, $repeats, %repeats);
+  
+  ($projects, $lists, $global_stats)= @_;
 
-  $sep = ' ;; '; # this local sep thing will have to go!!!
+  $sep = ' ;; '; # this local sep thing all over the place will have to go!!!
 
   foreach $project_category (@$projects) {
 
@@ -1002,9 +1031,11 @@ sub do_global_stats_by_reading_from_disk {
 
     # The previous routine had to uncompress $old_ids_on_disk. Compress back.
     &compress_file_maybe($old_ids_file_name);
-  }
 
-  exit(0);
+    $global_flag = 1; # Here, calc the stats for all the articles
+    &calc_stats($old_ids_on_disk, $global_stats, $global_flag, \%repeats);
+
+  }
 }
 
 # Category:Mathematics is always guaranteed to have subcategories and articls. If none are found, we have a problem
@@ -1583,7 +1614,7 @@ sub read_old_ids_from_disk {
 sub write_old_ids_on_disk {
 
   my ($new_arts, $old_ids_on_disk, $list_name, $old_ids_file_name, $sep);
-  my ($current_time_stamp, $article, $two_weeks, $link, $command);
+  my ($current_time_stamp, $article, $seconds, $link, $command);
 
   ($new_arts, $old_ids_on_disk, $old_ids_file_name, $sep) = @_;
 
@@ -1616,18 +1647,18 @@ sub write_old_ids_on_disk {
   
   # Write to disk the updated old ids
   # do not write those old_ids with a time stamp older than $Number_of_days
-  $two_weeks = 60*60*24*$Number_of_days;
+  $seconds = 60*60*24*$Number_of_days;
 
   open(REV_WRITE_FILE, ">$old_ids_file_name");
-  print REV_WRITE_FILE "# Data in the order article, quality, date, old_id, time stamp in seconds, "
-     . "with '$sep' as separator\n";
+  print REV_WRITE_FILE "# Data in the order article, quality, date, old_id, "
+     . "time stamp in seconds, with '$sep' as separator\n";
   
   foreach $article (sort {$a cmp $b} keys %$old_ids_on_disk){
 
     # Do not write the old_ids with a time stamp older than $Number_of_days.
     # Those are no longer currently in the list, and if they are not there
     # for $Number_of_days, then it is time to ditch them. 
-    if ($old_ids_on_disk->{$article}->{'time_stamp'} < $current_time_stamp - $two_weeks){
+    if ($old_ids_on_disk->{$article}->{'time_stamp'} < $current_time_stamp - $seconds){
       print "Note: Bypassing '$article' as its timestamp is too old!\n";
       next;
     }
