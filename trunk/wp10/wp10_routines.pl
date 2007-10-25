@@ -1161,8 +1161,7 @@ sub print_stats{
     $text = $text . "\n" . '|-' . "\n"; # start new row
   }
   
-  $text = $text . '|}' . "\n";              # close the table
-  $text =~ s/(\Q$Total\E)/\'\'\'$1\'\'\'/g; # boldify the string "Total" in cells
+  $text = $text . '|}';              # close the table
   return $text;
 }
 
