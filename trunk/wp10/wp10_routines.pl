@@ -131,11 +131,9 @@ sub main_wp10_routine {
   # see if to run just one project or all of them
   $run_one_project_only=""; if (@_) { $run_one_project_only = shift};
 
-  $date=&current_date();
-
   # base-most stuff
   &fetch_quality_categories(\@projects);
-  &update_index(\@projects, \%lists, \%logs, \%stats, \%wikiprojects, $date);
+  &update_index(\@projects, \%lists, \%logs, \%stats, \%wikiprojects);
 
   # Go through @projects in the order of projects not done for a while get done first
   $done_projects_file='Done_projects.txt'; 
@@ -165,6 +163,8 @@ sub main_wp10_routine {
       &check_for_errors_reading_cats();
     }
 
+    $date=&current_date();
+    
     # read existing lists into %old_arts
     $file = $lists{$project_category};
     ($text, $front_matter)=&fetch_list_subpages($file, \@breakpoints);
@@ -244,7 +244,7 @@ sub update_index{
  
   my ($category, $text, $file, $line, $list, $stat, $log, $short_list, $preamble, $bottom);
   my ($wikiproject, $count, %sort_order);
-  my ($projects, $lists, $logs, $stats, $wikiprojects, $date)=@_;
+  my ($projects, $lists, $logs, $stats, $wikiprojects)=@_;
 
   # fetch existing index, read the wikiprojects from there (need that as names of wikiprojects can't be generated)
 
@@ -1484,11 +1484,13 @@ sub print_current_category {
 
 sub current_date {
 
-  my ($year);
+  my ($year, $date);
   my ($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = gmtime();
   $year = 1900 + $yearOffset;
-  return "$Months[$month] $dayOfMonth, $year";
+  
+  $date = "$Months[$month] $dayOfMonth, $year";
 
+  return $date;
 }
 
 sub most_recent_history_links_query {
