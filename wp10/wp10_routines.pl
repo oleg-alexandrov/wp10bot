@@ -71,10 +71,11 @@ my $Assessed_Class = 'Assessed-Class';
 # The quality and importance ratings.
 # The two hashes below must have different keys!
 
-my %Quality=('FA-Class'=>1, 'A-Class'=>2, 'GA-Class'=>3, 'B-Class'=>4,
-	    'Start-Class'=>5, 'Stub-Class'=>6, $Assessed_Class=>7, $Unassessed_Class=>8);
-my %Importance=('Top-Class'=>1, 'High-Class'=>2, 'Mid-Class'=>3,
-	       'Low-Class'=>4, $No_Class=>5);
+my %Quality=('FA-Class' => 1, 'A-Class' => 2, 'GA-Class' => 3, 'B-Class' => 4,
+             'Start-Class' => 5, 'Stub-Class' => 6, $Assessed_Class => 7, 'List-Class' => 8,
+             $Unassessed_Class => 9);
+my %Importance=('Top-Class' => 1, 'High-Class' => 2, 'Mid-Class' => 3,
+	       'Low-Class' => 4, $No_Class => 5);
 
 my  @Months=("January", "February", "March", "April", "May", "June",
 	     "July", "August",  "September", "October", "November", "December");
@@ -969,9 +970,6 @@ sub calc_stats {
       $imp = $No_Class;
     }
     
-    #$old_ids_on_disk->{$article}->{'quality'} = $new_arts->{$article}->{'quality'};
-    #$old_ids_on_disk->{$article}->{'date'} = $new_arts->{$article}->{'date'};
-
     $stats->{$qual}->{$imp}++;
     $stats->{$Total}->{$imp}++;
     $stats->{$qual}->{$Total}++;
@@ -983,7 +981,8 @@ sub calc_stats {
   foreach $imp ( (sort {$Importance{$a} <=> $Importance{$b} } keys %Importance), $Total){
 
     # first make sure that subtraction is well-defined
-    $stats->{$Total}->{$imp} = 0  unless (exists $stats->{$Total}->{$imp});
+    $stats->{$Total}->{$imp} = 0
+       unless (exists $stats->{$Total}->{$imp});
     $stats->{$Unassessed_Class}->{$imp} = 0
        unless (exists $stats->{$Unassessed_Class}->{$imp});
 
@@ -1109,6 +1108,9 @@ sub print_stats{
 
   # loop through the rows of the table
   foreach $qual ( (sort { $Quality{$a} <=> $Quality{$b} } keys %Quality), $Total){
+
+    # ignore blank rows in the table
+    next if ( ( !exists $stats->{$qual}->{$Total} ) || ( $stats->{$qual}->{$Total} == 0 ) );
 
     # $qual_noclass is $qual after stripping the '-Class' suffix
     $qual_noclass = $qual; $qual_noclass =~ s/-\Q$Class\E$//ig;
