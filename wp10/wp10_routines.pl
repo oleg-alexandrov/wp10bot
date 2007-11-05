@@ -1100,9 +1100,9 @@ sub print_stats{
   }
   $text =~ s/\!\!\s*$/\n/g; # no !! after the last element, rather, go to a new line
 
-  # initialize the rows
+  # Initialize the rows. If another quality class is added in %Quality, increment rowspan below
   $text = $text . '|-
-! rowspan="10" | ' .  $Quality_word . '
+! rowspan="11" | ' .  $Quality_word . '
 |-
 ';
 
@@ -1136,11 +1136,13 @@ sub print_stats{
 
       # ignore blank columns in the table
       next if ( ( !exists $stats->{$Total}->{$imp} ) || $stats->{$Total}->{$imp} == 0 );
-      
-      if (exists $stats->{$qual}->{$imp}){
+     
+      # if the current cell number exists and is greater than zero
+      if (exists $stats->{$qual}->{$imp} && $stats->{$qual}->{$imp} > 0 ){
         
         if ($imp eq $Total || $qual eq $Total){
           
+          # if in the last column, or last row, so containing a total, then
           # insert the number in the cell in bold, looks nicer like that
           $text = $text . " '''" . $stats->{$qual}->{$imp} . "''' ";
           
