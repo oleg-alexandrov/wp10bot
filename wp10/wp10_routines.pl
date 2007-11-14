@@ -94,7 +94,7 @@ my $Editor;
 # articles together with their ratings and revision ids. This is
 # needed for backup purposes and to calculate the statistics (see more
 # below). Create this directory or else the bot will refuse to run.
-my $Storage_dir = "/tmp/wp10/"; 
+my $Storage_dir;
 
 # Continued from the previous paragraph, if an article went missing
 # from the list of assessed articles, keep its info on disk for
@@ -121,6 +121,13 @@ sub main_wp10_routine {
   my ($run_one_project_only, %map_qual_imp_to_cats, $stats_file);
   my (%project_stats, %global_stats, $global_flag, $done_projects_file);
   
+  if ($ENV{HOME}){
+     $Storage_dir = $ENV{HOME} . "/wp10/";
+  }else{
+    $Storage_dir = "/tmp/wp10/"; 
+  }
+  print "<br><br>\n\nWill back up the data in $Storage_dir<br><br>\n\n";
+
   # go to the working directory
   $dir=$0; $dir =~ s/\/[^\/]*$/\//g; chdir $dir;
 
