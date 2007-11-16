@@ -73,9 +73,10 @@ my $Assessed_Class = 'Assessed-Class';
 
 my %Quality=('FA-Class' => 1, 'A-Class' => 2, 'GA-Class' => 3, 'B-Class' => 4,
              'Start-Class' => 5, 'Stub-Class' => 6, $Assessed_Class => 7, 'List-Class' => 8,
-             $Unassessed_Class => 9);
+             $Unassessed_Class => 9); # If update here, also update &extra_categorizations below
+
 my %Importance=('Top-Class' => 1, 'High-Class' => 2, 'Mid-Class' => 3,
-	       'Low-Class' => 4, $No_Class => 5);
+	       'Low-Class' => 4, $No_Class => 5); # If update here, also update &extra_categorizations below
 
 my  @Months=("January", "February", "March", "April", "May", "June",
 	     "July", "August",  "September", "October", "November", "December");
@@ -1210,7 +1211,7 @@ sub extra_categorizations {
     foreach $cat (@cats){
       
       next if (exists $map{$cat}); # did this before
-      if ($type eq "quality" && $cat =~ /\Q$Category\E:(FA|A|GA|B|Start|Stub)-Class/i){
+      if ($type eq "quality" && $cat =~ /\Q$Category\E:(FA|A|GA|B|Start|Stub|List)-Class/i){
 	$map{$cat} = $Category . ":$1-Class articles";
       }elsif ($type eq "quality" && $cat =~ /\Q$Category\E:(Unassessed)/i){
 	$map{$cat}= $Category . ":$1-Class articles";
