@@ -1,4 +1,4 @@
-#!/usr/local/bin/perl
+#!/usr/bin/perl -w
 use POSIX;                     # the strftime function
 use CGI::Carp qw(fatalsToBrowser);
 use lib '/u/cedar/h1/afa/aoleg/public_html/wp/modules'; # path to perl modules
@@ -24,7 +24,7 @@ MAIN: {
   my ($assessments, $page, $project, $text, $sleep, $attempts, $iter, $class, $cat, $cat_wiki, $subject, $subcat, $subcat_wiki, $count, $root);
   
   $assessments->{quality}={'FA-Class'=>1, 'A-Class'=>2, 'GA-Class'=>3, 'B-Class'=>4,
-			      'Start-Class'=>5, 'Stub-Class'=>6, 'Unassessed-Class'=>100};
+			      'Start-Class'=>5, 'Stub-Class'=>6, 'List-Class'=>7, 'Unassessed-Class'=>100};
   $assessments->{importance}={'Top-importance'=>'1', 'High-importance'=>'2', 'Mid-importance'=>'3',
 		  'Low-importance'=>'4', 'No-importance'=>'5'};
   $root = 'Category:Wikipedia 1.0 assessments';
