@@ -1186,6 +1186,8 @@ sub extra_categorizations {
   my (@projects, @articles, $text, $project_category, $line, $cats_file, $file);
   my (%map, @imp_cats, @cats, $cat, $type, $edit_summary, $trunc_cat);
 
+  $Editor = wikipedia_login($Bot_name);
+
   $cats_file="Categorized_already.txt";
   open(FILE, "<$cats_file"); $text = <FILE>; close(FILE);
   foreach $line ( split ("\n", $text) ){
@@ -1211,11 +1213,12 @@ sub extra_categorizations {
     foreach $cat (@cats){
       
       next if (exists $map{$cat}); # did this before
-      if ($type eq "quality" && $cat =~ /\Q$Category\E:(FA|A|GA|B|Start|Stub|List)-Class/i){
+      
+      if ($type =~ /quality/ && $cat =~ /\Q$Category\E:(FA|A|GA|B|Start|Stub|List)-Class/i){
 	$map{$cat} = $Category . ":$1-Class articles";
-      }elsif ($type eq "quality" && $cat =~ /\Q$Category\E:(Unassessed)/i){
+      }elsif ($type =~ /quality/ && $cat =~ /\Q$Category\E:(Unassessed)/i){
 	$map{$cat}= $Category . ":$1-Class articles";
-      }elsif ($type eq "importance" && $cat =~ /\Q$Category\E:(Top|High|Mid|Low|No|Unknown)-importance/){
+      }elsif ($type =~ /importance/ && $cat =~ /\Q$Category\E:(Top|High|Mid|Low|No|Unknown)-importance/i){
 	$map{$cat}= $Category . ":$1-importance articles";
 	$map{$cat}=~ s/\Q$Category\E:No-importance/$Category:Unknown-importance/g;
       }else{
@@ -1224,12 +1227,18 @@ sub extra_categorizations {
 
       $file=$cat . ".wiki";
       $text=wikipedia_fetch($Editor, $file, $Attempts, $Sleep_fetch);
-      next if ($text =~ /$map{$cat}/i); # did this category before 
-
+      if ($text =~ /\Q$map{$cat}\E/i){ # did this category before 
+         print "\nCategorized $cat before\n\n";
+         next; 
+      }else{
+        print "\nWill now categorize $cat\n\n";
+      }
       $trunc_cat=$cat; $trunc_cat =~ s/^.*? //g;
-      $text = $text . "\n\[\[$map{$cat}\|$trunc_cat\]\]";
+      $text =~ s/\s*$//g; $text = $text . "\n\[\[$map{$cat}\|$trunc_cat\]\]";
       $edit_summary="Add to \[\[$map{$cat}\]\]";
-      wikipedia_submit($Editor, $file, $edit_summary, $text, $Attempts, $Sleep_submit);
+ 
+      # Note that we sleep longer before sumbissions here, there is nowhere to rush.
+      wikipedia_submit($Editor, $file, $edit_summary, $text, $Attempts, 5*$Sleep_submit);
     }
   }
 
