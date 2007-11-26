@@ -1061,7 +1061,7 @@ sub print_stats{
 
   my ($project_category, $map_qual_imp_to_cats, $stats) = @_;
   my ($project_sans_cat, $project_br, $text, $key, @articles, $cat, @categories);
-  my ($qual, $qual_noclass, $imp, $imp_noclass, $link, @tmp);
+  my ($qual, $qual_noclass, $imp, $imp_noclass, $link, @tmp, $num_rows);
 
   # This has is neeeded for the global totals. For the individual projects stats
   # make it just an empty hash.
@@ -1110,15 +1110,18 @@ sub print_stats{
 
   # Initialize the rows. If another quality class is added in %Quality, increment rowspan below
   $text = $text . '|-
-! rowspan="11" | ' .  $Quality_word . '
+! rowspan="temp_placeholder" | ' .  $Quality_word . '
 |-
 ';
 
   # loop through the rows of the table
+  $num_rows = 1; # start at 1 to include the info row 
   foreach $qual ( (sort { $Quality{$a} <=> $Quality{$b} } keys %Quality), $Total){
 
     # ignore blank rows in the table
     next if ( ( !exists $stats->{$qual}->{$Total} ) || ( $stats->{$qual}->{$Total} == 0 ) );
+
+    $num_rows++;
 
     # $qual_noclass is $qual after stripping the '-Class' suffix
     $qual_noclass = $qual; $qual_noclass =~ s/-\Q$Class\E$//ig;
@@ -1174,6 +1177,10 @@ sub print_stats{
   }
   
   $text = $text . '|}';              # close the table
+
+  # put the correct number of rows 
+  $text =~ s/rowspan=\"temp_placeholder\"/rowspan="$num_rows"/;
+
   return $text;
 }
 
