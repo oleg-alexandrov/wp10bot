@@ -145,7 +145,9 @@ sub main_wp10_routine {
   &update_index(\@projects, \%lists, \%logs, \%stats, \%wikiprojects);
 
   # Go through @projects in the order of projects not done for a while get done first
+  print "Now in $dir\n";
   $done_projects_file='Done_projects.txt'; 
+  
   &decide_order_of_running_projects(\@projects, $done_projects_file);
      
   if ($Lang eq 'en'){
@@ -1277,11 +1279,17 @@ sub put_biography_project_last {
     $hash_of_projects{$project} = $counter++;
   }
   
+  # put other biography projects last too
+  foreach $project (@$projects){
+    $hash_of_projects{$project} = $counter++ if ($project =~ /biography/i);
+  }
+
   $hash_of_projects{$Category . ":Biography articles by quality"}=$counter++; # make this be last;
 
   # put back into @$projects, with that biography category last
   @$projects = ();
   foreach $project (sort {$hash_of_projects{$a} <=> $hash_of_projects{$b} } keys %hash_of_projects){
+    print "Will do $project\n";
     push (@$projects, $project);
   }
 }
