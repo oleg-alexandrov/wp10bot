@@ -147,8 +147,9 @@ sub main_wp10_routine {
   # Go through @projects in the order of projects not done for a while get done first
   print "Now in $dir\n";
   $done_projects_file='Done_projects.txt'; 
-  
-  &decide_order_of_running_projects(\@projects, $done_projects_file);
+
+  # Keep this commented. Most of the time it is beter to just proceed alphabetically. 
+  #&decide_order_of_running_projects(\@projects, $done_projects_file);
      
   if ($Lang eq 'en'){
     # need this because the biography project takes much, much more time than others
