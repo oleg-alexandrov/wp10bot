@@ -71,9 +71,9 @@ my $Assessed_Class = 'Assessed-Class';
 # The quality and importance ratings.
 # The two hashes below must have different keys!
 
-my %Quality=('FA-Class' => 1, 'A-Class' => 2, 'GA-Class' => 3, 'B-Class' => 4,
-             'Start-Class' => 5, 'Stub-Class' => 6, $Assessed_Class => 7, 'List-Class' => 8,
-             $Unassessed_Class => 9); # If update here, also update &extra_categorizations below
+my %Quality=('FA-Class' => 1, 'FL-Class' => 2, 'A-Class' => 3, 'GA-Class' => 4, 'B-Class' => 5,
+             'Start-Class' => 6, 'Stub-Class' => 7, 'List-Class' => 8, $Assessed_Class => 9,
+             $Unassessed_Class => 10); # If update here, also update &extra_categorizations below
 
 my %Importance=('Top-Class' => 1, 'High-Class' => 2, 'Mid-Class' => 3,
 	       'Low-Class' => 4, $No_Class => 5); # If update here, also update &extra_categorizations below
@@ -85,7 +85,7 @@ my  @Months=("January", "February", "March", "April", "May", "June",
 # Constants needed to fetch from server and submit back
 my $Sleep_fetch  = 1;
 my $Sleep_submit = 5;
-my $Attempts     = 1000;
+my $Attempts     = 200;  # was 1000
 
 # The name of the bot and the user-agent, called $Editor
 my $Bot_name = 'WP 1.0 bot';
@@ -254,9 +254,13 @@ sub fetch_quality_categories{
 # other information. Keep that hash of hashes on Wikipedia as an index.
 sub update_index{
  
-  my ($category, $text, $file, $line, $list, $stat, $log, $short_list, $preamble, $bottom);
-  my ($wikiproject, $count, %sort_order);
+  my ($category, $text, $text2, $file, $line, $list, $stat, $log, $short_list, $preamble, $bottom);
+  my ($wikiproject, $count, %sort_order, $iter);
   my ($projects, $lists, $logs, $stats, $wikiprojects)=@_;
+
+  # will split the index into two pages, as it is too big currently
+  my $index2 = $Index_file;
+  $index2 =~ s/Index/Index2/i;
 
   # fetch existing index, read the wikiprojects from there (need that as names of wikiprojects can't be generated)
 
@@ -267,6 +271,7 @@ sub update_index{
   } else{
    $preamble = $Bot_tag; $bottom = $Bot_tag; 
   }
+  $text = $text . "\n" . wikipedia_fetch($Editor, $index2, $Attempts, $Sleep_fetch);
 
   foreach $line (split ("\n", $text) ){
     next unless ($line =~ /\[\[:(\Q$Category\E:.*?)\|.*?\[\[(\Q$Wikipedia\E:.*?)\|/);
@@ -290,8 +295,10 @@ sub update_index{
     $sort_order{$category}=$file;
   }
 
-  # put that data in a index of projects and submit to Wikipedia.
+  # put that data in a index of projects and submit to Wikipedia. Split the index in two as it is too big.
   $text = "";
+  $text2 = ""; 
+  $iter = 0;
   foreach $category (sort {$sort_order{$a} cmp $sort_order{$b}} keys %sort_order){
     
     $list        = $lists->{$category};         $list =~ s/\.wiki//g; $list =~ s/_/ /g;
@@ -300,19 +307,34 @@ sub update_index{
     $wikiproject = $wikiprojects->{$category};
        
     $short_list = $list; $short_list =~ s/^.*\///g; 
-    $text = $text . "\| \[\[$list\|$short_list\]\] \|\| "
+    $line = "\| \[\[$list\|$short_list\]\] \|\| "
        . "\(\[\[$stat\|" . lc($Statistics) . "\]\], \[\[$log\|" . lc($Log) . "\]\], "
 	  . "\[\[:$category\|" . lc($Category) . "\]\], \[\[$wikiproject\|" . lc($WikiProject) . "\]\]\)\n\|\-\n";
+
+    $iter ++;
+    if ($iter < 800){ # put a bunch of projects in first page, and the rest in second page
+      $text = $text . $line;
+    }else{
+      $text2 = $text2 . $line;
+    }
   }
 
+  my $index_strip = $Index_file; $index_strip  =~ s/\.wiki//; # rm extension
+  my $index2_strip = $index2;    $index2_strip =~ s/\.wiki//; # rm extension
   $count=scalar @$projects;
   $text = $preamble 
 	. "Currently, there are $count participating projects.\n\n" 
         . "\{\| class=\"wikitable\"\n"
         . $text . "\|\}\n"
+        . "Index continued at [[$index2_strip]].\n"  
 	. $bottom;
 
+  $text2 = "Index continued from [[$index_strip]].\n"  
+        . "\{\| class=\"wikitable\"\n"
+        . $text2 . "\|\}\n";
+
   wikipedia_submit($Editor, $Index_file, "Update index", $text, $Attempts, $Sleep_submit);
+  wikipedia_submit($Editor, $index2, "Second part of index", $text2, $Attempts, $Sleep_submit);
 }
 
 sub read_version{
@@ -425,6 +447,8 @@ sub extract_assessments{
     $art->{'importance'} =~ s/\{\{(.*?)\}\}/$1/g; # rm braces, if any
     $art->{'importance'} = $No_Class if ( !exists $Importance{ $art->{'importance'} } ); # default value
     
+    $art->{'date'} =~ s/[\[\]]//g; # rm links from dates
+
     # this is necessary as some articles may also have an external link next to them, pointing to a specific version
     if ($art->{'name'} =~ /\[\[(.*?)\]\]\s*\[(http:\/\/.*?)\s*\]/){
       $art->{'name'}=$1;
@@ -1224,7 +1248,7 @@ sub extra_categorizations {
       
       next if (exists $map{$cat}); # did this before
       
-      if ($type =~ /quality/ && $cat =~ /\Q$Category\E:(FA|A|GA|B|Start|Stub|List)-Class/i){
+      if ($type =~ /quality/ && $cat =~ /\Q$Category\E:(FA|FL|A|GA|B|Start|Stub|List)-Class/i){
 	$map{$cat} = $Category . ":$1-Class articles";
       }elsif ($type =~ /quality/ && $cat =~ /\Q$Category\E:(Unassessed)/i){
 	$map{$cat}= $Category . ":$1-Class articles";
@@ -1640,6 +1664,8 @@ sub read_old_ids_from_disk {
     # parse the line and read the data
     next unless ($line =~ /^(.*?)$sep(.*?)$sep(.*?)$sep(.*?)$sep(.*?)$sep(.*?)$/);
     $article = $1; $qual = $2; $imp = $3; $date = $4; $old_id = $5; $time_stamp = $6;
+
+    $date =~ s/[\[\]]//g; # rm links from dates
 
     $old_ids_on_disk->{$article}->{'quality'}=$qual;
     $old_ids_on_disk->{$article}->{'importance'}=$imp;
