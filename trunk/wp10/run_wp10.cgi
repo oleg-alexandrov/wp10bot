@@ -3,7 +3,7 @@
 use strict;                   # 'strict' insists that all variables be declared
 use diagnostics;              # 'diagnostics' expands the cryptic warnings
 
-use lib '/u/cedar/h1/afa/aoleg' . '/public_html/wp/modules'; # path to perl modules
+use lib '/u/cedar/h2/afa/aoleg' . '/public_html/wp/modules'; # path to perl modules
 use Unicode::Normalize;
 use LWP::Simple;
 use CGI::Carp qw(fatalsToBrowser);
@@ -24,6 +24,9 @@ MAIN: {
 
   # Print the header
   &print_head();
+
+  print "This service does not work for the moment. I am looking for a new home for it. Thank you for your understanding.\n";
+  exit (0);
 
   $project = $input{'project'};
 
