@@ -72,8 +72,9 @@ my $Assessed_Class = 'Assessed-Class';
 # The two hashes below must have different keys!
 
 my %Quality=('FA-Class' => 1, 'FL-Class' => 2, 'A-Class' => 3, 'GA-Class' => 4, 'B-Class' => 5,
-             'Start-Class' => 6, 'Stub-Class' => 7, 'List-Class' => 8, $Assessed_Class => 9,
-             $Unassessed_Class => 10); # If update here, also update &extra_categorizations below
+             'C-Class'=> 6, 'Start-Class' => 7, 'Stub-Class' => 8, 'List-Class' => 9, $Assessed_Class => 10,
+             $Unassessed_Class => 11); 
+	     # If you update here, also update &extra_categorizations below and gen_cats.cgi
 
 my %Importance=('Top-Class' => 1, 'High-Class' => 2, 'Mid-Class' => 3,
 	       'Low-Class' => 4, $No_Class => 5); # If update here, also update &extra_categorizations below
@@ -1248,8 +1249,8 @@ sub extra_categorizations {
       
       next if (exists $map{$cat}); # did this before
       
-      if ($type =~ /quality/ && $cat =~ /\Q$Category\E:(FA|FL|A|GA|B|Start|Stub|List)-Class/i){
-	$map{$cat} = $Category . ":$1-Class articles";
+      if ($type =~ /quality/ && $cat =~ /\Q$Category\E:(FA|FL|A|GA|B|C|Start|Stub|List)-Class/i){
+        $map{$cat} = $Category .  ":$1-Class articles";
       }elsif ($type =~ /quality/ && $cat =~ /\Q$Category\E:(Unassessed)/i){
 	$map{$cat}= $Category . ":$1-Class articles";
       }elsif ($type =~ /importance/ && $cat =~ /\Q$Category\E:(Top|High|Mid|Low|No|Unknown)-importance/i){
