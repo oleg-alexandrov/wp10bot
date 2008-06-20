@@ -74,7 +74,7 @@ my $Assessed_Class = 'Assessed-Class';
 my %Quality=('FA-Class' => 1, 'FL-Class' => 2, 'A-Class' => 3, 'GA-Class' => 4, 'B-Class' => 5,
              'C-Class'=> 6, 'Start-Class' => 7, 'Stub-Class' => 8, 'List-Class' => 9, $Assessed_Class => 10,
              $Unassessed_Class => 11); 
-	     # If you update here, also update &extra_categorizations below and gen_cats.cgi
+             # If you update here, also update &extra_categorizations below and gen_cats.cgi
 
 my %Importance=('Top-Class' => 1, 'High-Class' => 2, 'Mid-Class' => 3,
 	       'Low-Class' => 4, $No_Class => 5); # If update here, also update &extra_categorizations below
@@ -1248,7 +1248,7 @@ sub extra_categorizations {
     foreach $cat (@cats){
       
       next if (exists $map{$cat}); # did this before
-      
+
       if ($type =~ /quality/ && $cat =~ /\Q$Category\E:(FA|FL|A|GA|B|C|Start|Stub|List)-Class/i){
         $map{$cat} = $Category .  ":$1-Class articles";
       }elsif ($type =~ /quality/ && $cat =~ /\Q$Category\E:(Unassessed)/i){
@@ -1315,7 +1315,7 @@ sub put_biography_project_last {
   # put back into @$projects, with that biography category last
   @$projects = ();
   foreach $project (sort {$hash_of_projects{$a} <=> $hash_of_projects{$b} } keys %hash_of_projects){
-    print "Will do $project\n";
+    #print "Will do $project\n";
     push (@$projects, $project);
   }
 }
