@@ -24,7 +24,11 @@ MAIN: {
   my ($assessments, $page, $project, $text, $sleep, $attempts, $iter, $class, $cat, $cat_wiki, $subject, $subcat, $subcat_wiki, $count, $root);
   
   $assessments->{quality}={'FA-Class'=>1, 'FL-Class'=>2, 'A-Class'=>3, 'GA-Class'=>4, 'B-Class'=>5,
-			      'Start-Class'=>6, 'Stub-Class'=>7, 'List-Class'=>8, 'Unassessed-Class'=>100};
+			      'C-Class'=>6, 'Start-Class'=>7,
+			      'Stub-Class'=>8, 'List-Class'=>9,
+			      'Assessed-Class'=>10, 'Unassessed-Class'=>11 
+			      };
+
   $assessments->{importance}={'Top-importance'=>'1', 'High-importance'=>'2', 'Mid-importance'=>'3',
 		  'Low-importance'=>'4', 'No-importance'=>'5'};
   $root = 'Category:Wikipedia 1.0 assessments';
