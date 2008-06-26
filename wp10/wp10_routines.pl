@@ -5,16 +5,32 @@ use lib $ENV{HOME} . '/public_html/cgi-bin/wp/modules'; # path to perl modules
 use strict;                   # 'strict' insists that all variables be declared
 use diagnostics;              # 'diagnostics' expands the cryptic warnings
 use Encode;
-use Perlwikipedia;
+#use Perlwikipedia;
+use HTML::Entities;
 
-require 'bin/perlwikipedia_utils.pl';
-require 'bin/fetch_articles_cats.pl';
+use Data::Dumper;
+
+use lib '/home/oleg/public_html/cgi-bin/wp/wp10';
+use lib '/home/oleg/public_html/cgi-bin/modules';
+
+require 'bin/fetch_articles_cats2.pl';  # Most of the API interface is here
 require 'bin/html_encode_decode_string.pl';
-require 'bin/get_html.pl';
+require 'bin/get_html2.pl';              # Should be reworked
 require 'bin/language_definitions.pl';
 require 'bin/rm_extra_html.pl';
+require 'bin/wikipedia_submit.pl';
+require 'bin/watchdog_file.pl';
 
-undef $/;		      # undefines the separator. Can read one whole file in one scalar.
+undef $/;      # undefines the separator. Can read one whole file in one scalar.
+
+###
+# Make STDOUT unbuffered and encoded in utf8
+select STDOUT;
+$| = 1;
+binmode STDOUT, ":utf8"; 
+
+# debugging variable
+my $fetchedNames = 0;
 
 # Global variables, to not carry them around all over the place.
 # Notice the convention, all global variables start with a CAPITAL letter.
@@ -72,9 +88,12 @@ my $Assessed_Class = 'Assessed-Class';
 # The two hashes below must have different keys!
 
 my %Quality=('FA-Class' => 1, 'FL-Class' => 2, 'A-Class' => 3, 'GA-Class' => 4, 'B-Class' => 5,
-             'C-Class'=> 6, 'Start-Class' => 7, 'Stub-Class' => 8, 'List-Class' => 9, $Assessed_Class => 10,
-             $Unassessed_Class => 11); 
-             # If you update here, also update &extra_categorizations below and gen_cats.cgi
+             'C-Class' => 6, 'Start-Class'=>7, 'Stub-Class' => 8, 'List-Class' => 9, $Assessed_Class => 10,
+             $Unassessed_Class => 11); # If update here, also update &extra_categorizations below
+
+#my %Quality=('FA-Class' => 1, 'A-Class' => 2, 'GA-Class' => 3, 'B-Class' => 4,
+#             'Start-Class' => 5, 'Stub-Class' => 6, $Assessed_Class => 7, 'List-Class' => 8,
+#             $Unassessed_Class => 9); # If update here, also update &extra_categorizations below
 
 my %Importance=('Top-Class' => 1, 'High-Class' => 2, 'Mid-Class' => 3,
 	       'Low-Class' => 4, $No_Class => 5); # If update here, also update &extra_categorizations below
@@ -86,11 +105,7 @@ my  @Months=("January", "February", "March", "April", "May", "June",
 # Constants needed to fetch from server and submit back
 my $Sleep_fetch  = 1;
 my $Sleep_submit = 5;
-my $Attempts     = 200;  # was 1000
-
-# The name of the bot and the user-agent, called $Editor
-my $Bot_name = 'WP 1.0 bot';
-my $Editor;
+my $Attempts     = 1000;
 
 # A directory on disk where the bot will store a list of all assessed
 # articles together with their ratings and revision ids. This is
@@ -110,9 +125,14 @@ my $Number_of_days = 9;
 # than it should be, since it will also count articles which may have
 # been removed on Wikipedia in the last $Number_of_days.
 
-
 my $Separator = ' -;;- '; # Used to separate fields in lines in many places
 
+
+## Used to keep track of elapsed running time; timestamp when script starts
+my $Init_time = time();
+
+
+######################################################################
 
 sub main_wp10_routine {
   
@@ -122,21 +142,23 @@ sub main_wp10_routine {
   my (@breakpoints, $todays_log, $front_matter, %repeats, %version_hash);
   my ($run_one_project_only, %map_qual_imp_to_cats, $stats_file);
   my (%project_stats, %global_stats, $global_flag, $done_projects_file);
+
+  create_watchdog_file();
   
   if ($ENV{HOME}){
-     $Storage_dir = $ENV{HOME} . "/wp10/";
+     $Storage_dir = $ENV{HOME} . "/wp10.b/";
   }else{
     $Storage_dir = "/tmp/wp10/"; 
   }
-  print "<br><br>\n\nWill back up the data in $Storage_dir<br><br>\n\n";
+  print "<br/><br/>\n\nWill back up the data in $Storage_dir<br/><br/>\n\n";
 
   # go to the working directory
   $dir=$0; $dir =~ s/\/[^\/]*$/\//g; chdir $dir;
 
-  #  print "<font color=red>Bot down for maintanance for half a day. Come back later. </font>\n"; exit(0);
+  if ( -e '/home/oleg/run/stop') {
+    print "<font color=red>Bot down for maintanance for half a day. Please come back later. </font>\n"; exit(0);
+  }
 
-  # Log in 
-  $Editor = wikipedia_login($Bot_name);
 
   # see if to run just one project or all of them
   $run_one_project_only=""; if (@_) { $run_one_project_only = shift};
@@ -148,9 +170,8 @@ sub main_wp10_routine {
   # Go through @projects in the order of projects not done for a while get done first
   print "Now in $dir\n";
   $done_projects_file='Done_projects.txt'; 
-
-  # Keep this commented. Most of the time it is beter to just proceed alphabetically. 
-  #&decide_order_of_running_projects(\@projects, $done_projects_file);
+  
+  &decide_order_of_running_projects(\@projects, $done_projects_file);
      
   if ($Lang eq 'en'){
     # need this because the biography project takes much, much more time than others
@@ -162,13 +183,24 @@ sub main_wp10_routine {
 
   # Go through all projects, search the categories in there,
   # and merge with existing information.
-  foreach $project_category (@projects) {
+
+  my $t = scalar @projects;
+  my $i = 0;
+  foreach $project_category ( @projects ){
+
+    if ( ! $run_one_project_only) { 
+      $i++;
+      print "<br/>\n<br/>\n";
+      print   "---------------- $project_category <br/>\n";
+      print   "---------------- $i/$t <br/>\n";
+      printf  "---------------- Elapsed %2.2f hours <br/>\n",  
+                                        (time() - $Init_time) / 3600;
+      print "<br/>\n<br/>\n";
+    } 
 
     # if told to run just one project, ignore the others
-    next if ($run_one_project_only && $project_category !~ /\Q$run_one_project_only\E/i);
-
-    # log in for each project (to control occasional spontaneous bot logouts)
-    $Editor = wikipedia_login($Bot_name);
+    next if ($run_one_project_only && 
+             $project_category !~ /\Q$run_one_project_only\E/i);
 
     # Exit if for some reason the routine reading categories fails.
     # This is basically a hack.
@@ -180,6 +212,8 @@ sub main_wp10_routine {
     
     # read existing lists into %old_arts
     $file = $lists{$project_category};
+    print "File: '$file'\n";
+    die if ( ! defined $file);
     ($text, $front_matter)=&fetch_list_subpages($file, \@breakpoints);
     &extract_assessments ($project_category, $text, \%old_arts); 
 
@@ -195,8 +229,7 @@ sub main_wp10_routine {
     &calc_stats(\%new_arts, \%project_stats, $global_flag, \%repeats);
     $text = &print_stats($project_category, \%map_qual_imp_to_cats, \%project_stats)
        . &print_current_category($project_category);
-    wikipedia_submit($Editor, $file, "$Statistics for $date", $text,
-                     $Attempts, $Sleep_submit); 
+    &wikipedia_submit2($file, "$Statistics for $date (test code)", $text);
 
     # the heart of the code, compare %old_arts and %new_arts, merge some info
     # from old into new, and generate a log
@@ -206,11 +239,20 @@ sub main_wp10_routine {
 
     # Submit the collected information to update the relevant Wikipedia pages
     &split_into_subpages_maybe_and_submit ($file, $project_category, $front_matter,
-             $wikiprojects{$project_category}, $date, \@breakpoints, \%new_arts);
+              $wikiprojects{$project_category}, $date, \@breakpoints, \%new_arts);
 
     &process_submit_log($logs{$project_category}, $todays_log, $project_category, $date);
 
     &mark_project_as_done($project_category, $done_projects_file);
+
+    open DEBUG, ">>/home/oleg/wp10.b/Debug.$$";
+    print DEBUG "\n\n----- ads243 $project_category\n";
+    print DEBUG "---- old_arts\n";
+    print DEBUG Dumper(%old_arts);
+    print DEBUG "\n---- new_arts\n";
+    print DEBUG Dumper(%new_arts);
+    close DEBUG;
+
   }
 
   # don't compute the total stats if the script was called just for one project
@@ -227,8 +269,16 @@ sub main_wp10_routine {
   if ($Lang eq 'en'){
     &extra_categorizations();
   }
+
+  print "\n";
+  print   "--------------- Finished.<br/>\n";
+  printf  "--------------- Running time: %2.2f hours <br/>\n",  
+                                       (time() - $Init_time) / 3600;
+
+  remove_watchdog_file();
 }
 
+######################################################################
 sub fetch_quality_categories{
 
   my ($projects, $cat, @tmp_cats, @tmp_articles);
@@ -251,10 +301,11 @@ sub fetch_quality_categories{
   }
 }
 
+######################################################################
 # Create a hash of hashes containing the files the bot will write to, and some
 # other information. Keep that hash of hashes on Wikipedia as an index.
 sub update_index{
- 
+
   my ($category, $text, $text2, $file, $line, $list, $stat, $log, $short_list, $preamble, $bottom);
   my ($wikiproject, $count, %sort_order, $iter);
   my ($projects, $lists, $logs, $stats, $wikiprojects)=@_;
@@ -266,13 +317,15 @@ sub update_index{
   # fetch existing index, read the wikiprojects from there (need that as names of wikiprojects can't be generated)
 
   # save preamble for the future
-  $text = wikipedia_fetch($Editor, $Index_file, $Attempts, $Sleep_fetch);
+  $text = wikipedia_fetch2($Index_file, $Attempts, $Sleep_fetch);
+
   if ($text =~ /^(.*?$Bot_tag.*?\n)(.*?)($Bot_tag.*?)$/s){
     $preamble=$1; $text=$2; $bottom=$3;
   } else{
-   $preamble = $Bot_tag; $bottom = $Bot_tag; 
+    $preamble = $Bot_tag; $bottom = $Bot_tag; 
   }
-  $text = $text . "\n" . wikipedia_fetch($Editor, $index2, $Attempts, $Sleep_fetch);
+
+  $text = $text . "\n" . wikipedia_fetch2($index2, $Attempts, $Sleep_fetch);
 
   foreach $line (split ("\n", $text) ){
     next unless ($line =~ /\[\[:(\Q$Category\E:.*?)\|.*?\[\[(\Q$Wikipedia\E:.*?)\|/);
@@ -296,10 +349,11 @@ sub update_index{
     $sort_order{$category}=$file;
   }
 
-  # put that data in a index of projects and submit to Wikipedia. Split the index in two as it is too big.
+  # put that data in a index of projects and submit to Wikipedia.
   $text = "";
   $text2 = ""; 
   $iter = 0;
+
   foreach $category (sort {$sort_order{$a} cmp $sort_order{$b}} keys %sort_order){
     
     $list        = $lists->{$category};         $list =~ s/\.wiki//g; $list =~ s/_/ /g;
@@ -310,19 +364,24 @@ sub update_index{
     $short_list = $list; $short_list =~ s/^.*\///g; 
     $line = "\| \[\[$list\|$short_list\]\] \|\| "
        . "\(\[\[$stat\|" . lc($Statistics) . "\]\], \[\[$log\|" . lc($Log) . "\]\], "
-	  . "\[\[:$category\|" . lc($Category) . "\]\], \[\[$wikiproject\|" . lc($WikiProject) . "\]\]\)\n\|\-\n";
+          . "\[\[:$category\|" . lc($Category) . "\]\], \[\[$wikiproject\|" . lc($WikiProject) . "\]\]\)\n\|\-\n";
 
     $iter ++;
     if ($iter < 800){ # put a bunch of projects in first page, and the rest in second page
-      $text = $text . $line;
+       $text = $text . $line;
     }else{
-      $text2 = $text2 . $line;
+       $text2 = $text2 . $line;
     }
+
+#    $text = $text . "\| \[\[$list\|$short_list\]\] \|\| "
+#       . "\(\[\[$stat\|" . lc($Statistics) . "\]\], \[\[$log\|" . lc($Log) . "\]\], "
+#	  . "\[\[:$category\|" . lc($Category) . "\]\], \[\[$wikiproject\|" . lc($WikiProject) . "\]\]\)\n\|\-\n";
   }
 
   my $index_strip = $Index_file; $index_strip  =~ s/\.wiki//; # rm extension
   my $index2_strip = $index2;    $index2_strip =~ s/\.wiki//; # rm extension
   $count=scalar @$projects;
+
   $text = $preamble 
 	. "Currently, there are $count participating projects.\n\n" 
         . "\{\| class=\"wikitable\"\n"
@@ -334,14 +393,17 @@ sub update_index{
         . "\{\| class=\"wikitable\"\n"
         . $text2 . "\|\}\n";
 
-  wikipedia_submit($Editor, $Index_file, "Update index", $text, $Attempts, $Sleep_submit);
-  wikipedia_submit($Editor, $index2, "Second part of index", $text2, $Attempts, $Sleep_submit);
+  &wikipedia_submit2($Index_file, "Update index (test code)", $text);
+  &wikipedia_submit2($index2, "Update second part of index (test code)", $text2, $Attempts, $Sleep_submit);
+
+#  exit;
 }
 
+######################################################################
 sub read_version{
 
   print "<font color=red>I have to read <b>all</b> version 0.5 and 1.0 "
-      . "articles before proceeding with your request. Be patient. </font><br><br>\n";
+      . "articles before proceeding with your request. Be patient. </font><br/><br/>\n";
 
   my ($version_hash, %cats_hash, $cat, $subcat, @subcats, @all_subcats, $article, @articles);
   $version_hash = shift;
@@ -387,20 +449,22 @@ sub read_version{
     }
   }
 
-  print "<font color=red>Done reading all version articles. Will proceed to your request.</font><br><br>\n";
+  print "<font color=red>Done reading all version articles. Will proceed to your request.</font><br/><br/>\n";
 
 }
 
+######################################################################
 # fetch given list. If it has subpages, fetch those too. Put into one big $text variable.
 sub fetch_list_subpages{
+
   my ($file, $breakpoints, $text, $front_matter, $base_page, @subpages, $subpage, $subpage_text, $line);
 
   $file=shift; $breakpoints=shift; 
 
   @$breakpoints=();
 
-  $text = wikipedia_fetch($Editor, $file, $Attempts, $Sleep_fetch);
-  
+  $text = wikipedia_fetch2($file, $Attempts, $Sleep_fetch);
+ 
   if ($text =~ /^(.*?$Bot_tag.*?\n)/s){
     $front_matter=$1;
   }else{
@@ -409,23 +473,26 @@ sub fetch_list_subpages{
 
   $base_page=$file; $base_page =~ s/\.wiki//g;
   @subpages = ($text =~ /\[\[(\Q$base_page\E\/\d+)[\|\]]/g); #must use \Q and \E since $base_page can have special chars
-  foreach $subpage (@subpages){
+
+  if ( scalar @subpages > 0) { 
+    print "Getting source code for " . (scalar @subpages) . " pages\n";
+    my $data = fetch_content(\@subpages);
+
+    foreach $subpage (@subpages){ 
+      $text = $text . "\n" . $data->{$subpage};
     
-    $subpage = $subpage . ".wiki";
-    $subpage_text = wikipedia_fetch($Editor, $subpage, $Attempts, $Sleep_fetch);
-    $text = $text . "\n" . $subpage_text;
-    
-    if ($subpage_text =~ /^.*\{\{assessment\s*\|\s*page\s*=\s*\[\[(.*?)\]\]/s){
-      push (@$breakpoints, $1); # will need the breakpoints when updating the subpages.
+      if ($data->{$subpage} =~ /^.*\{\{assessment\s*\|\s*page\s*=\s*\[\[(.*?)\]\]/s){
+        push (@$breakpoints, $1); # will need the breakpoints when updating the subpages.
+      }
     }
   }
-
   return ($text, $front_matter);
 }
 
+######################################################################
 # given the $text read from the list and it subpages, parse it and put the info in a hash
 sub extract_assessments{
-  
+
   my ($project_category, $arts, $line, $art, $file, $text, $talkpage);
   $project_category=shift; $text = shift; $arts = shift; 
   
@@ -464,9 +531,11 @@ sub extract_assessments{
   }
 }
 
-# read the quality, importance, and comments categories into %$new_arts. Later that will be merged with the info already in the lists
+######################################################################
+# Read the quality, importance, and comments categories into %$new_arts. 
+# Later that will be merged with the info already in the lists
 sub collect_new_from_categories {
-  
+
   my (@cats, @dummy, @articles, $article, $wikiproject, $new_arts, $art, $cat, @tmp, $counter);
   my ($project_category, $importance_category, $date, $qual, $imp, $comments_category, $map_qual_imp_to_cats);
 
@@ -492,11 +561,16 @@ sub collect_new_from_categories {
     # will need this map when counting how many articles of each type we have
     $map_qual_imp_to_cats->{$qual} = $cat;
 
+#    open DEBUG, ">>Data";
+#    binmode DEBUG, ":utf8";
+
     # collect the articles
     &fetch_articles_cats($cat, \@dummy, \@articles); 
     foreach $article (@articles) {
+#      print DEBUG "$cat -- $article \n";
       next unless ($article =~ /^\Q$Talk\E:(.*?)$/i);
       $article = $1;
+#      print DEBUG "\t$article \n";
 
       # store all the data in an an object
       $new_arts->{$article}=article_assesment->new();
@@ -506,6 +580,8 @@ sub collect_new_from_categories {
       $new_arts->{$article}->{'quality'}=$qual;
     }
   }
+
+#  close DEBUG;
 
   # look in $importance_category, e.g., "Chemistry articles by importance", read its subcategories,
   # for example, "Top chemistry articles", etc.
@@ -570,6 +646,7 @@ sub collect_new_from_categories {
   }
 }
 
+######################################################################
 # the heart of the code
 sub compare_merge_and_log_diffs {
 
@@ -612,7 +689,7 @@ sub compare_merge_and_log_diffs {
             =~ /^(.*?\/w\/index\.php\?title=).*?(\&oldid=.*?)$/i) {
           
           $old_arts->{$new_name}->{'hist_link'}
-             =  $1 .  &html_encode_string ($new_name) . $2;
+             =  $1 .  &html_encode_string($new_name) . $2;
         }
         
         #note the move in the log
@@ -703,7 +780,7 @@ sub compare_merge_and_log_diffs {
     
     # if the article quality improved (smaller quality value), link to the latest entry in history
     if ($Quality{$new_arts->{$article}->{'quality'}} < $Quality{$old_arts->{$article}->{'quality'}}) {
-      print "Assesment improved for \[\[$article\]\].<br>\n";
+      print "Assesment improved for \[\[$article\]\].<br/>\n";
       $latest_old_ids->{$article} = ""; # will fill that in later
     }
 
@@ -726,7 +803,8 @@ sub compare_merge_and_log_diffs {
     $log_text = $log_text . $line;
   }
 
-  # fill in the most recent history link for articles which are new or changed the assessment for the better
+  # fill in the most recent history link for articles which are new 
+  # or changed the assessment for the better
   &most_recent_history_links_query ($new_arts, $latest_old_ids);
 
   # Merge info from $new_arts to $old_ids_on_disk, and write to disk.
@@ -738,7 +816,9 @@ sub compare_merge_and_log_diffs {
   return $log_text;
 }
 
-# Create the name of a file where will store information. See the top of the code for why.
+######################################################################
+# Create the name of a file where will store information. 
+# See the top of the code for why.
 sub list_name_to_file_name {
 
   my $file_name = shift;
@@ -756,7 +836,9 @@ sub list_name_to_file_name {
   return $file_name;
 }  
 
+######################################################################
 sub split_into_subpages_maybe_and_submit {
+
   my ($global_count, @count, $subpage_no, $subpage_file, @lines, $line);
   my ($subpage_frontmatter, @subpages, $re_login_flag, $edit_sum);
   my ($max_pagesize, $min_pagesize, $name, $mx, $mn, $base_page, $i, $iplus, $text);
@@ -768,42 +850,56 @@ sub split_into_subpages_maybe_and_submit {
   $front_matter=&print_main_front_matter() if (!$front_matter || $front_matter =~ /^\s*$/);
   
   # lots of things to initialize
-  $global_count=0; $subpage_no=0; @count=(0); @subpages=(""); 
+  $global_count=0; $subpage_no=0; @count=(0); 
   @$breakpoints=(@$breakpoints, "", ""); # don't complain about not beining initialized
+
+  # @subpages will be an array of array references. 
+  # Each $subpages[$i] is an array of text lines that get catenated to page that subpage
+  @subpages=( [] );   
   
+  # Sort the articles at the start, to avoid redundant sorts later
+  my @list = sort { &cmp_arts($new_arts->{$a}, $new_arts->{$b}) } keys %$new_arts;
+
   # see if to split into subpages at all, and if current breakpoints
   # still make the pages small
-  foreach $name ( sort { &cmp_arts($new_arts->{$a}, $new_arts->{$b}) } keys %$new_arts) {
-
+  foreach $name ( @list) {
     $line=&print_object_data ($new_arts->{$name});
-
     next unless ($line =~ /\{\{assessment\s*\|\s*page\s*=\s*\[\[.+?\]\]/);
 
-    $subpages[$subpage_no]=$subpages[$subpage_no] . $line;
-
-    $global_count++; $count[$subpage_no]++; # increment all
+    push @{$subpages[$subpage_no]}, $line;
+    $global_count++; 
+    $count[$subpage_no]++; # increment all
 
     if ($breakpoints->[$subpage_no] eq $name){ # reached a breakpoint, create a new subpage
-      $subpage_no++; push(@subpages, ""); push(@count, 0);
+      $subpage_no++; 
+      push @subpages, [];
+      push @count, 0;
     }
   }
 
-  $edit_sum = "Update for $date";
-  
+  $edit_sum = "Update for $date (test code)";
+
   # if decided not to split into subpages, just submit the text and return 
   if ($global_count <= $max_pagesize){ #don't split into subpages
-    print "Only $global_count articles. Won't split into subpages!\n";
-    $text=join ("", @subpages);
+    print "Only $global_count articles. Won't split into subpages!<br/>\n";
+   
+    $text = "";
+    for ( $i = 0; $i < scalar @subpages; $i++) { 
+      $text .= join "", @{$subpages[$i]};
+    }
+
     $text = $front_matter
        . &print_table_header($project_category, $wikiproject)
 	   . $text
 	   . &print_table_footer($date, $project_category)
 	   . &print_current_category ($project_category);
 
-    $Editor = wikipedia_login($Bot_name);  
-    wikipedia_submit($Editor, $file, $edit_sum, $text, $Attempts, $Sleep_submit); 
+    &wikipedia_submit2($file, $edit_sum, $text);
     return;
   }
+
+
+  print "Subpage count: $subpage_no\n";
 
   # see what is the smallest number of entries in a subpage
   # (not counting the last one which may be small)
@@ -814,15 +910,30 @@ sub split_into_subpages_maybe_and_submit {
   
   # see if it is possible to add the last subpage to the one before it
   # (the last subpage may be small)
-  if ($subpage_no >= 1 && $count[$subpage_no-1] + $count[$subpage_no] <= $max_pagesize){
+  if ($subpage_no >= 1 
+       && $count[$subpage_no-1] + $count[$subpage_no] <= $max_pagesize 
+       && $count[$subpage_no] > 0) {
 
-    $subpages[$subpage_no-1] = $subpages[$subpage_no-1] . $subpages[$subpage_no];
-    $subpages[$subpage_no]="";
+    print "Add last subpage to previous one...\n";
+
+    $subpages[$subpage_no-1] = 
+        [ @{$subpages[$subpage_no-1]} , @{$subpages[$subpage_no]}];
+    $subpages[$subpage_no]= [];
 
     $count[$subpage_no-1]    = $count[$subpage_no-1]+$count[$subpage_no];
     $count[$subpage_no]=0;    
 
     $subpage_no--;
+  }
+
+  print "Last size: " . $count[$subpage_no] . "\n";
+  if ( $count[$subpage_no] == 0) { 
+    print "Last subpage is empty!\n";
+    $subpage_no--;
+  }
+
+  for ($i = 0; $i < scalar @subpages; $i++) { 
+    print "Subpage $i " .  (scalar @{$subpages[$i]}) . "\n";
   }
 
   # see what is the largest number of entries in a subpage (counting the last one)
@@ -833,34 +944,46 @@ sub split_into_subpages_maybe_and_submit {
 
   if ($mn < $min_pagesize - 100 || $mx > $max_pagesize){
     if ($mn < $min_pagesize - 100){
-      print "There are subpages with under $mn articles. Will resplit!\n";
+      print "There are subpages with under $mn articles. Will resplit!<br/>\n";
     }elsif ($mx > $max_pagesize){
-      print "There are subpages with more than $mx articles. Will split!\n";
+      print "There are subpages with more than $mx articles. Will split!</br/>\n";
     }
     
     # have to resplit into subpages, as some are either too big or too small
-    $subpage_no=0; @count=(0); @subpages=("");
-    foreach $name ( sort { &cmp_arts($new_arts->{$a}, $new_arts->{$b}) } keys %$new_arts) {
+    $subpage_no=0; 
+    @count=(0); 
+
+    @subpages=([]);
+
+    foreach $name ( @list )  {
 
       $line=&print_object_data ($new_arts->{$name}); # and append this entry
-
-      $subpages[$subpage_no]=$subpages[$subpage_no] . $line;
+      push @{$subpages[$subpage_no]}, $line;
       $count[$subpage_no]++; # increment all
       
       if ($count[$subpage_no] >= $min_pagesize){ # make a new subpage
-        $subpage_no++; push(@subpages, ""); push(@count, 0);
+        $subpage_no++; 
+        push @subpages, []; 
+        push(@count, 0);
       }
     }
 
     # don't let the last subpage be empty
-    $subpage_no-- if ($subpages[$subpage_no] =~ /^\s*$/); 
+    $subpage_no-- if (scalar @{$subpages[$subpage_no]} == 0); 
+    print "After resplitting, there are " . ($subpage_no + 1) . " subpages<br/>\n";
   }
 
   # Generate the index, and print header and footer to subpages. Submit
   $text = $front_matter .  &print_index_header($project_category, $wikiproject);
 
+  my @subpage_texts;
+
   $re_login_flag = 1;
   for ($i=0 ; $i <= $subpage_no; $i++){
+    if ( ! defined $subpages[$i] ) { 
+      print "Not defined\n";
+      next;
+    }	
 
     $iplus=$i+1;
 
@@ -869,56 +992,34 @@ sub split_into_subpages_maybe_and_submit {
     # print a subpage. Note in line 4 the date field is empty,
     # to not update a page if only the date changed
     my $empty_date="";
-    $subpages[$i] = &print_navigation_bar($base_page, $iplus, $subpage_no+1)
-                  . &print_table_header($project_category, $wikiproject)
-                  . $subpages[$i]     
-                  . &print_table_footer($empty_date, $project_category) 
-                  . &print_navigation_bar($base_page, $iplus, $subpage_no+1);
+    $subpage_texts[$i] =   &print_navigation_bar($base_page, $iplus, $subpage_no+1)
+                         . &print_table_header($project_category, $wikiproject)
+                         . (join "", @{$subpages[$i]} )      
+                         . &print_table_footer($empty_date, $project_category) 
+                         . &print_navigation_bar($base_page, $iplus, $subpage_no+1);
 
     $subpage_file = $base_page . "\/" . $iplus . ".wiki";
 
-    &see_if_to_re_login (\$re_login_flag, \$Editor);
-    
-    wikipedia_submit($Editor, $subpage_file, $edit_sum, $subpages[$i],
-                     $Attempts, $Sleep_submit);
+    &wikipedia_submit2($subpage_file, $edit_sum, $subpage_texts[$i]);
 
   }
   $text = $text . &print_index_footer($date, $project_category) . &print_current_category ($project_category);
   
   # submit the index of subpages
-  $Editor = wikipedia_login($Bot_name);
-  wikipedia_submit($Editor, $file, $edit_sum, $text, $Attempts, $Sleep_submit);
-
+  &wikipedia_submit2($file, $edit_sum, $text);
 }
 
-# pass arguments to this function only by reference
-sub see_if_to_re_login {
 
-  my ($re_login_flag, $Editor) = @_;
-
-  my $re_login_freq = 50;
-  
-  if ($$re_login_flag <= 1){ 
-
-    $$Editor = wikipedia_login($Bot_name);
-    $$re_login_flag = $re_login_freq; 
-    
-  }else{
-
-    $$re_login_flag--;
-    
-  }
-  
-}
-
+######################################################################
 sub process_submit_log {
+
   my ($todays_log, $combined_log, $date, @logs, %log_hash, $entry, $heading, $body);
   my (%order, $count, $project_category, $file);
   
   $file = shift; $todays_log = shift; $project_category = shift; $date = shift;
 
   # fetch the log from server, strip data before first section, and prepend today's log to it
-  $combined_log=wikipedia_fetch($Editor, $file, $Attempts, $Sleep_fetch);
+  $combined_log=wikipedia_fetch2($file, $Attempts, $Sleep_fetch);
   $combined_log =~ s/^.*?(===)/$1/sg;
   $combined_log = $todays_log . "\n" . $combined_log;
 
@@ -964,10 +1065,12 @@ sub process_submit_log {
   # categorize the logs, and put a message on top
   $combined_log  =  '{{Log}}' . "\n" . &print_current_category($project_category) . $combined_log;
 
-  wikipedia_submit($Editor, $file, "$Log for $date", $combined_log, $Attempts, $Sleep_submit);
+  &wikipedia_submit2($file, "$Log for $date (test code)", $combined_log);
 }
 
+######################################################################
 sub truncate_log {
+
   my ($log, $max_length) = @_;
 
   if (length ($log) > $max_length ) {
@@ -979,18 +1082,21 @@ sub truncate_log {
   return $log;
 }
 
+######################################################################
 sub calc_stats {
+
   my ($article, $qual, $imp);
   my ($articles, $stats, $global_flag, $repeats)=@_;
-
 
   # If not doing the global stats (where results for all the projects are aggregated)
   # then blank this hash
   %$stats = () unless ($global_flag);
 
+  print "Calculating statistics for " . (scalar keys %$articles)
+                                      . " articles<br/>\n";
+
   # count by quality and importance
   foreach $article (keys %$articles){
-
     # When doing the global stats, make sure don't count each article more than once.
     # This is needed since the same article can show up in many projects.
     if ($global_flag){
@@ -1026,9 +1132,11 @@ sub calc_stats {
     $stats->{$Assessed_Class}->{$imp}
        = $stats->{$Total}->{$imp} - $stats->{$Unassessed_Class}->{$imp} ;
   }
+  print "Done calculating statistics.<br/>\n";
 }
 
 
+######################################################################
 sub calc_global_stats_by_reading_from_disk {
 
   # Calculate the global stats by reading the information we saved on disk
@@ -1066,25 +1174,27 @@ sub calc_global_stats_by_reading_from_disk {
 
     $global_flag = 1; # Here, calc the stats for all the articles
     &calc_stats($old_ids_on_disk, $global_stats, $global_flag, \%repeats);
-
   }
 }
 
-# Category:Mathematics is always guaranteed to have subcategories and articls.
+######################################################################
+# Category:Mathematics is always guaranteed to have subcategories and articles.
 # If none are found, we have a problem.
 # This is is disabled on other language Wikipedias as not so essential.
 sub check_for_errors_reading_cats {
+
   my ($category, @cats, @articles);
   $category = $Category . ":Mathematics";
   print "Doing some <b>debugging</b> first ... "
-      . "Die if can't detect subcategories or articles due to changed API... <br>\n";
+      . "Die if can't detect subcategories or articles due to changed API... <br/>\n";
   &fetch_articles_cats($category, \@cats, \@articles); 
   if ( !@cats || !@articles){
-    print "Error! Can't detect subcatgories or articles!\n"; 
+    print "Error! Can't detect subcatgories or articles!<br/>\n"; 
     exit (0); 
   }	
 }
 
+######################################################################
 sub print_stats{
 
   my ($project_category, $map_qual_imp_to_cats, $stats) = @_;
@@ -1212,6 +1322,7 @@ sub print_stats{
   return $text;
 }
 
+######################################################################
 # The function below, extra_categorizations will not be called outside English Wikipedia
 # It will be a pain to translate it to other languages. It is not that important either.
 # It puts [[Category:GA-Class Aztec articles]] into [[Category:GA-Class articles]], etc.
@@ -1221,10 +1332,12 @@ sub extra_categorizations {
   my (@projects, @articles, $text, $project_category, $line, $cats_file, $file);
   my (%map, @imp_cats, @cats, $cat, $type, $edit_summary, $trunc_cat);
 
-  $Editor = wikipedia_login($Bot_name);
-
   $cats_file="Categorized_already.txt";
-  open(FILE, "<$cats_file"); $text = <FILE>; close(FILE);
+  open(FILE, "<$cats_file"); 
+  binmode FILE, ":utf8";
+  $text = <FILE>; 
+  close(FILE);
+  
   foreach $line ( split ("\n", $text) ){
     next unless ($line =~ /^(.*?)$Separator(.*?)$/);
     $map{$1}=$2;
@@ -1234,7 +1347,13 @@ sub extra_categorizations {
 
   # Go through all projects, search the categories in there,
   # and merge with existing information
+  my $count;
   foreach $project_category (@projects) {
+    $count++;
+    print   "--------------- Categorizing $project_category <br/>\n";
+    print   "--------------- " . $count . "/" . scalar @projects . "<br/>\n";
+    printf  "--------------- Elapsed %2.2f hours <br/>\n",  
+                                        (time() - $Init_time) / 3600;
 
     if ($Lang eq 'en'){
       next if ($project_category =~ /\Q$Category\E:Articles (\Q$By_quality\E|\Q$By_importance\E)/); # meta cat
@@ -1248,9 +1367,9 @@ sub extra_categorizations {
     foreach $cat (@cats){
       
       next if (exists $map{$cat}); # did this before
-
-      if ($type =~ /quality/ && $cat =~ /\Q$Category\E:(FA|FL|A|GA|B|C|Start|Stub|List)-Class/i){
-        $map{$cat} = $Category .  ":$1-Class articles";
+      
+      if ($type =~ /quality/ && $cat =~ /\Q$Category\E:(FA|FL|A|GA|B|Start|Stub|List)-Class/i){
+	$map{$cat} = $Category . ":$1-Class articles";
       }elsif ($type =~ /quality/ && $cat =~ /\Q$Category\E:(Unassessed)/i){
 	$map{$cat}= $Category . ":$1-Class articles";
       }elsif ($type =~ /importance/ && $cat =~ /\Q$Category\E:(Top|High|Mid|Low|No|Unknown)-importance/i){
@@ -1261,42 +1380,47 @@ sub extra_categorizations {
       }
 
       $file=$cat . ".wiki";
-      $text=wikipedia_fetch($Editor, $file, $Attempts, $Sleep_fetch);
+      $text=wikipedia_fetch2($file, $Attempts, $Sleep_fetch);
+
       if ($text =~ /\Q$map{$cat}\E/i){ # did this category before 
-         print "\nCategorized $cat before\n\n";
+         print "uf8", "\nCategorized $cat before<br/>\n";
          next; 
       }else{
-        print "\nWill now categorize $cat\n\n";
+        print "\nWill now categorize $cat<br/>\n";
       }
       $trunc_cat=$cat; $trunc_cat =~ s/^.*? //g;
       $text =~ s/\s*$//g; $text = $text . "\n\[\[$map{$cat}\|$trunc_cat\]\]";
       $edit_summary="Add to \[\[$map{$cat}\]\]";
  
       # Note that we sleep longer before sumbissions here, there is nowhere to rush.
-      wikipedia_submit($Editor, $file, $edit_summary, $text, $Attempts, 5*$Sleep_submit);
+      &wikipedia_submit2($file, $edit_summary, $text);
     }
   }
 
   open(FILE, ">$cats_file");
+  binmode FILE, ":utf8";
   foreach $line (sort {$a cmp $b} keys %map){ print FILE "$line$Separator$map{$line}\n";  }
   close(FILE);
 }
 
+######################################################################
 sub submit_global_stats{
+
   my ($stats_file, $global_stats, $date, $All_projects, $text);
 
   ($stats_file, $global_stats, $date, $All_projects) = @_;
 
-  $text=wikipedia_fetch($Editor, $stats_file, $Attempts, $Sleep_fetch);
+  $text=wikipedia_fetch2($stats_file, $Attempts, $Sleep_fetch);
   $text =~ s/^(.*?)($|\Q$Bot_tag\E)/$Bot_tag/s;
   $text = &print_stats($All_projects, "", $global_stats) . $text;
-  wikipedia_submit($Editor, $stats_file, "All stats for $date", $text,
-                   $Attempts, $Sleep_submit);
+  &wikipedia_submit2($stats_file, "All stats for $date", $text);
 }
 
 
+######################################################################
 # this will only run on the English Wikipedia!
 sub put_biography_project_last {
+
   my (%hash_of_projects, $projects, $project, $counter);
   $projects = shift;
 
@@ -1315,16 +1439,20 @@ sub put_biography_project_last {
   # put back into @$projects, with that biography category last
   @$projects = ();
   foreach $project (sort {$hash_of_projects{$a} <=> $hash_of_projects{$b} } keys %hash_of_projects){
-    #print "Will do $project\n";
+    print "Will do " . $project . "<br/>\n";
     push (@$projects, $project);
   }
 }
 
+######################################################################
 # identify the parent Wikproject of the current project category
 sub get_wikiproject {
+
   my ($category, $text, $error, $wikiproject, $wikiproject_alt);
   
   $category=shift;
+  print "Get name for " . $category . "\n";
+
   ($text, $error) = &get_html ( $Wiki_http . '/wiki/' .  &html_encode_string($category) );
   
   if ($text =~ /(\Q$Wikipedia\E:\Q$WikiProject\E[^\"]*?)[\#\"]/) {
@@ -1348,12 +1476,12 @@ sub get_wikiproject {
   
   # if $Lang is 'en', try some other dirty tricks to find the wikiproject
   # First check if the wikiproject was guessed right
-  $text=wikipedia_fetch($Editor, $wikiproject . ".wiki", $Attempts, $Sleep_fetch);
+  $text=wikipedia_fetch2($wikiproject . ".wiki", $Attempts, $Sleep_fetch);
 
   # if the wikiproject was not guessed right, maybe the plural is wrong (frequent occurence)
   if ($text =~ /^\s*$/){
     $wikiproject_alt = $wikiproject . "s";
-    $text=wikipedia_fetch($Editor, $wikiproject_alt . ".wiki", $Attempts, $Sleep_fetch);
+    $text=wikipedia_fetch2($wikiproject_alt . ".wiki", $Attempts, $Sleep_fetch);
     $wikiproject = $wikiproject_alt if ($text !~ /^\s*$/); # guessed right now
   }
 
@@ -1361,32 +1489,33 @@ sub get_wikiproject {
   if ($text =~ /^\s*$/ && $wikiproject =~ /(-| )related/){
     # if the wikiproject is still wrong, perhaps the related keyword is causing problems	 
     $wikiproject_alt = $wikiproject; $wikiproject_alt =~ s/(-| )related//g;
-    $text=wikipedia_fetch($Editor, $wikiproject_alt . ".wiki", $Attempts, $Sleep_fetch);
+    $text=wikipedia_fetch2($wikiproject_alt . ".wiki", $Attempts, $Sleep_fetch);
     $wikiproject = $wikiproject_alt if ($text !~ /^\s*$/); # guessed right now
   }
 
   # Sometimes things like "Armenian" --> "Armenia" are necessary
   if ($text =~ /^\s*$/ && $wikiproject =~ /n$/){
     $wikiproject_alt = $wikiproject; $wikiproject_alt =~ s/n$//g;
-    $text=wikipedia_fetch($Editor, $wikiproject_alt . ".wiki", $Attempts, $Sleep_fetch);
+    $text=wikipedia_fetch2($wikiproject_alt . ".wiki", $Attempts, $Sleep_fetch);
     $wikiproject = $wikiproject_alt if ($text !~ /^\s*$/); # guessed right now
   }
 
-  print "Wikiproject is $wikiproject<br><br>\n\n";
+  print "Wikiproject is $wikiproject<br/><br/>\n\n";
   return $wikiproject;
 }
 
+######################################################################
 sub cmp_arts {
   my ($art1, $art2);
   $art1=shift; $art2=shift; 
 
   # sort by quality 
   if (! exists $Quality{$art1->{'quality'}}){
-    print "Quality not defined at \'$art1->{'quality'}\'\n";
+    print "Quality not defined at $art1->{'name'} \'$art1->{'quality'}\'\n";
     return 0;
   }
   if (! exists $Quality{$art2->{'quality'}}){
-    print "Quality not defined at \'$art2->{'quality'}\'\n";
+    print "Quality not defined at $art2->{'name'} \'$art2->{'quality'}\'\n";
     return 0;
   }
 
@@ -1396,11 +1525,11 @@ sub cmp_arts {
 
   # sort by importance now
   if (! exists $Importance{$art1->{'importance'}}){
-    print "Importance not defined at \'$art1->{'importance'}\'\n";
+    print "Importance not defined at $art1->{'name'} \'$art1->{'importance'}\'\n";
     return 0;
   }
   if (! exists $Importance{$art2->{'importance'}}){
-    print "Importance not defined at \'$art2->{'importance'}\'\n";
+    print "Importance not defined at $art2->{'name'} \'$art2->{'importance'}\'\n";
     return 0;
   }
       
@@ -1414,7 +1543,9 @@ sub cmp_arts {
   return 0;		      # the entries must be equal I guess
 }
 
+######################################################################
 sub print_table_header {
+
   my ($wikiproject, $category, $wikiproject_talk, $abbrev);
 
   $category=shift;
@@ -1428,7 +1559,9 @@ sub print_table_header {
 	. "\{\{assessment header\|$wikiproject_talk|$abbrev\}\}\n";
 }
 
+######################################################################
 sub print_index_header {
+
   my ($wikiproject, $category, $wikiproject_talk, $abbrev);
 
   $category=shift;
@@ -1442,6 +1575,7 @@ sub print_index_header {
      . "\{\{assessment index header\|$wikiproject_talk|$abbrev\}\}\n";
 }
 
+######################################################################
 sub print_table_footer {
   my ($cat, $date);
   $date=shift; $cat = shift; 
@@ -1451,6 +1585,7 @@ sub print_table_footer {
   
 }
 
+######################################################################
 sub print_index_footer {
   my ($cat, $date);
   $date=shift; $cat = shift; 
@@ -1460,6 +1595,7 @@ sub print_index_footer {
   
 }
 
+######################################################################
 sub print_main_front_matter{
 
   my $index_nowiki = $Index_file; $index_nowiki =~ s/\.wiki//g;
@@ -1479,6 +1615,7 @@ sub print_main_front_matter{
 ';
 }
 
+######################################################################
 sub print_navigation_bar {
   my ($base_page, $cur_subpage, $total_subpages, $prev_link, $next_link, $prev_num, $next_num);
   $base_page=shift;  $cur_subpage=shift; $total_subpages=shift;
@@ -1512,6 +1649,7 @@ sub print_navigation_bar {
 
 }
 
+######################################################################
 sub print_object_data {
 
   my ($art, $text, $name, $imp);
@@ -1539,11 +1677,13 @@ sub print_object_data {
   return $text;
 }
 
+######################################################################
 sub print_current_category {
   my $category = shift;
   return '<noinclude>[[' . $category . ']]</noinclude>' . "\n";
 }
 
+######################################################################
 sub current_date {
 
   my ($year, $date);
@@ -1555,54 +1695,49 @@ sub current_date {
   return $date;
 }
 
+######################################################################
 sub most_recent_history_links_query {
-  
-  my ($articles, $latest_old_ids, $query_link, $link, $article, $article_enc, $max_no, $count,  $iter);
-  my ($max_url_length);
+
+  my ($articles, $latest_old_ids, $link, $article, $article_enc, $max_no, $count,  $iter);
 
   $articles = shift;  $latest_old_ids = shift;
 
   # in each query find the most recent history link of max_no articles at once, to speed things up
-  $max_no = 5;
+  $max_no = 100;
 
-  $max_url_length = 500;
-
-  $query_link = $Wiki_http . '/w/query.php?format=txt&what=revisions&rvlimit=1&titles=';
-
-  $count=0; $link = $query_link;
+  $count=0; 
+  $link = [];
   foreach $article ( sort {$a cmp $b} keys %$latest_old_ids){
     
     $count++;
     
     # encode to html, but with plus signs instead of underscores
-    $article_enc = $article; $article_enc = &html_encode_string ($article_enc); $article_enc =~ s/_/\+/g;
-    
+    $article_enc = $article; 
+ 
     # do a bunch of queries at once
-    $link = $link . $article_enc . '|';
+    push @$link, $article_enc;
     
-    # but no more than $max_no, and make sure each link is not too long
-    if ( $count >= $max_no || length ($link) > $max_url_length ){
-      
-      $link =~ s/\|$//g; # strip last pipe
-      
+    # but no more than $max_no
+    if ( $count >= $max_no ){
       # run the query
-      &run_history_query ($link, $latest_old_ids);
+      &fetch_revids($link, $latest_old_ids);
       
       # reset
-      $count=0; $link = $query_link; 
+      $count=0; 
+      $link = [];
     }
   }
   
   # run it one last time for the leftover articles, if any
-  $link =~ s/\|$//g; # strip last pipe
-  &run_history_query ($link, $latest_old_ids) unless ($count == 0);
+  &fetch_revids($link, $latest_old_ids) unless ( scalar @$link == 0);
   
-  # use the history id to create a link to the most recent article history link
-  foreach $article ( keys %$latest_old_ids ){
-    
+  # use the history id to create a link to the most recent article 
+  # history link
+  foreach $article ( keys %$latest_old_ids ){    
     if (!exists $latest_old_ids->{$article} || $latest_old_ids->{$article} !~ /^\d+$/){
-      print "Error in retrieving the latest history link of $article! "
-	 .  "I got '" . $latest_old_ids->{$article} . "' as history link!<br>\n";
+      print "Error in retrieving the latest history link of '$article'! <br/>"
+    } else { 
+       print  "Got '" . $latest_old_ids->{$article} . "' as revision id for '$article'.<br/>\n";
     }
     
     # compete the URL
@@ -1610,36 +1745,7 @@ sub most_recent_history_links_query {
   }
 }
 
-# do a query of the form
-# http://en.wikipedia.org//w/query.php?format=txt&what=revisions&rvlimit=1&titles=Main_Page|Mathematics
-# and extract from there the lastest history ids of the titles in the link above
-sub run_history_query {
-
-  my ($link, $text, $error, $latest_old_ids, $article, $id, $entry, @entries, $count);
-
-  $link = shift; $latest_old_ids = shift;
-  
-  print "Fetching $link<br>\n";
-  ($text, $error) = &get_html($link);
-  $text = &rm_extra_html($text);
-
-  print "sleep $Sleep_fetch<br>\n"; 
-  sleep $Sleep_fetch;
-
-  @entries= split ("(?=\\[title\\])", $text);
-  foreach $entry (@entries){
-    next unless ($entry =~ /\[title\]\s*=\>\s*(.*?)\n.*?\[revid\]\s*=\>\s*(\d+)\n/is);
-    
-    $article = $1;
-    $id = $2;
-    $article =~ s/\s*$//g;
-
-    print "$article --> $id<br>\n";
-    $latest_old_ids->{$article} = $id;
-
-  }
-}
-
+######################################################################
 # this subroutine and the one below read and write old_ids from disk. It is more reliable to have
 # that info stored on disk in addition to Wikipedia
 
@@ -1655,6 +1761,7 @@ sub read_old_ids_from_disk {
   # read from disk
   if (-e "$old_ids_file_name" ){
     open(REV_READ_FILE, "<$old_ids_file_name");
+    binmode REV_READ_FILE, ":utf8";
     @lines = split ("\n", <REV_READ_FILE>);
     close(REV_READ_FILE);
   }
@@ -1677,6 +1784,7 @@ sub read_old_ids_from_disk {
 }
 
 
+######################################################################
 sub write_old_ids_on_disk {
 
   my ($new_arts, $old_ids_on_disk, $list_name, $old_ids_file_name, $sep);
@@ -1717,6 +1825,8 @@ sub write_old_ids_on_disk {
   $seconds = 60*60*24*$Number_of_days;
 
   open(REV_WRITE_FILE, ">$old_ids_file_name");
+  binmode REV_WRITE_FILE, ":utf8";
+
   print REV_WRITE_FILE "# Data in the order article, quality, importance, date, old_id, "
      . "time stamp in seconds, with '$sep' as separator\n";
   
@@ -1726,7 +1836,7 @@ sub write_old_ids_on_disk {
     # Those are no longer currently in the list, and if they are not there
     # for $Number_of_days, then it is time to ditch them. 
     if ($old_ids_on_disk->{$article}->{'time_stamp'} < $current_time_stamp - $seconds){
-      print "Note: Bypassing '$article' as its timestamp is too old!\n";
+      print "Note: Bypassing '$article' as its timestamp is too old!<br/>\n";
       next;
     }
     
@@ -1744,7 +1854,9 @@ sub write_old_ids_on_disk {
 }
 
   
-# On en.wikipedia I use bzip2 to zip files. This won't work for scripts ran on Windows
+######################################################################
+# On en.wikipedia I use bzip2 to zip files. 
+# This won't work for scripts ran on Windows
 sub uncompress_file_maybe {
 
   my ($old_ids_file_name, $command);
@@ -1752,16 +1864,21 @@ sub uncompress_file_maybe {
   $old_ids_file_name = shift;
   
   if ($Lang eq 'en'){
+    if ( -r "$old_ids_file_name.bz2") { 
+      $command = "bunzip2 -fv \"$old_ids_file_name.bz2\"";
 
-    $command = "bunzip2 -fv \"$old_ids_file_name.bz2\"";
-    
-    print "sleep 1\n"; sleep 1; # let the filesever have time to think
-    print "$command" . "\n";
-    print `$command` . "\n";
-    print "sleep 1\n"; sleep 1; 
+      print "Will run $command in one second.<br/>" . "\n";    
+      sleep 1; # let the filesever have time to think
+      print "\tRunning...<br/>\n";
+      print `$command` . "<br/>\n";
+      print "Sleep 1 sec after running.<br/>\n"; sleep 1; 
+    } else {
+      print "File $old_ids_file_name.bz2 not readable, not trying to uncompress.<br/>\n";
+    }
   }
 }
 
+######################################################################
 # Opposite of the above. This and the above may need merging into one function
 # to avoid code repetition. 
 sub compress_file_maybe {
@@ -1774,13 +1891,17 @@ sub compress_file_maybe {
 
     $command = "bzip2 -fv \"$old_ids_file_name\"";
 
-    print "sleep 1\n"; sleep 1; # let the filesever have time to think
-    print "$command" . "\n";
-    print `$command` . "\n";
-    print "sleep 1\n"; sleep 1; 
+    # let the filesever have time to think
+    print "Will run $command in one second.<br/>" . "\n";    
+    sleep 1; 
+    print "\tRunning...<br/>\n";
+    print `$command` . " <br/>\n";
+    print "Sleep 1 sec after running.<br/>\n"; 
+    sleep 1; 
   }
 }
 
+######################################################################
 sub old_id_to_hist_link {
 
   my ($old_id, $article) = @_;
@@ -1793,10 +1914,10 @@ sub old_id_to_hist_link {
 
 }
 
+######################################################################
 # given a link to a history version of a Wikipedia article
 # of the form http://en.wikipedia.org/w/index.php?oldid=86978700
 # get the article name (as the heading 1 title)
-
 sub hist_link_to_article_name {
 
   my ($hist_link, $article_name, $text, $error, $count);
@@ -1804,7 +1925,7 @@ sub hist_link_to_article_name {
   $hist_link = shift;
 
   if ( !$hist_link || $hist_link !~ /^\s*http.*?oldid=\d+/){
-    print "Error! The following history link is invalid: $hist_link\n";
+    print "Error! The following history link is invalid: '$hist_link'\n";
     return "";
   }
 
@@ -1812,26 +1933,33 @@ sub hist_link_to_article_name {
   $article_name = "";
   for ($count = 0; $count < 1000; $count++) {
 
+    $fetchedNames++;  # count requests
+
+    print "Get name for article ($fetchedNames)...\n";
+    print "\t link $hist_link\n";
+
     ($text, $error) = &get_html ($hist_link);
     if ($text =~ /\<h1.*?\>(.*?)\</i){
       $article_name = $1;
+      print "\t name is $article_name<br/>\n";
       last;
 
     }else{
-      print "Error! Could not get article name for $hist_link in attempt $count!!!<br>\n";
+      print "Error! Could not get article name for $hist_link in attempt $count!!!<br/>\n";
       sleep 10;
     }
 
   }
 
   if ($article_name =~ /^\s*$/){
-     print "Failed! Bailing out<br>\n";
+     print "Failed! Bailing out<br/>\n";
      exit (0);
   } 
 
   return $article_name;
 }
 
+######################################################################
 sub mark_project_as_done {
 
   my ($current_project, $done_projects_file) = @_;
@@ -1844,6 +1972,8 @@ sub mark_project_as_done {
 
   # Write back to disk, with oldest coming first
   open(FILE, ">$done_projects_file");
+  binmode FILE, ":utf8";
+
   foreach $project (sort { $project_stamps{$a} <=> $project_stamps{$b} } keys %project_stamps){
 
     $project_stamp = $project_stamps{$project};
@@ -1855,6 +1985,7 @@ sub mark_project_as_done {
 
 }
 
+######################################################################
 sub decide_order_of_running_projects {
   
   my ($projects, $done_projects_file) = @_;
@@ -1890,12 +2021,16 @@ sub decide_order_of_running_projects {
   }
 }
 
+######################################################################
 sub read_done_projects {
 
   my ($done_projects_file, $project_stamps) = @_;
   my ($text, $line, $project, $project_stamp);
   
-  open(FILE, "<$done_projects_file"); $text = <FILE>; close(FILE);
+  open(FILE, "<$done_projects_file"); 
+  binmode FILE, ":utf8";
+
+  $text = <FILE>; close(FILE);
   foreach $line (split ("\n", $text) ){
     next unless ($line =~ /^(.*?)$Separator(.*?)$Separator/);
 
@@ -1905,12 +2040,14 @@ sub read_done_projects {
 
 }
 
+######################################################################
 sub strip_cat {
   my $project_category = shift;
   my $project_sans_cat = $project_category; $project_sans_cat =~ s/^\Q$Category\E:(.*?) \Q$By_quality\E/$1/g;
   return $project_sans_cat;
 }
 
+######################################################################
 sub arttalk {
   my $article = shift;
 
@@ -1918,6 +2055,8 @@ sub arttalk {
      . $article->{'quality'} . ' (' . $article->{'importance'} . ')';
 }
    
+
+######################################################################
 # the structure holding an article and its attributes. This code must be the last thing in this file.
 package article_assesment;
 
