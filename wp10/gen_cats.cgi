@@ -33,7 +33,7 @@ MAIN: {
 		  'Low-importance'=>'4', 'No-importance'=>'5'};
   $root = 'Category:Wikipedia 1.0 assessments';
 
-  &wikipedia_login('Mathbot');
+  &wikipedia_login('WP 1.0 bot');
   $sleep = 2; $attempts=10;
 
   $page = 'Wikipedia:Version 1.0 Editorial Team/Generate categories/Protected.wiki';
