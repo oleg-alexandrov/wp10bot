@@ -143,8 +143,15 @@ sub main_wp10_routine {
   my ($run_one_project_only, %map_qual_imp_to_cats, $stats_file);
   my (%project_stats, %global_stats, $global_flag, $done_projects_file);
 
-  create_watchdog_file();
-  
+  # see if to run just one project or all of them
+  $run_one_project_only=""; if (@_) { $run_one_project_only = shift};
+
+  if (! $run_one_project_only){
+     # This is neeeded only when there are multiple projects and we want the bot
+     # to stop as soon as the current project is done with.
+     create_watchdog_file();
+  }
+
   if ($ENV{HOME}){
      $Storage_dir = $ENV{HOME} . "/wp10.b/";
   }else{
@@ -158,10 +165,6 @@ sub main_wp10_routine {
   if ( -e '/home/oleg/run/stop') {
     print "<font color=red>Bot down for maintanance for half a day. Please come back later. </font>\n"; exit(0);
   }
-
-
-  # see if to run just one project or all of them
-  $run_one_project_only=""; if (@_) { $run_one_project_only = shift};
 
   # base-most stuff
   &fetch_quality_categories(\@projects);
@@ -188,6 +191,12 @@ sub main_wp10_routine {
   my $i = 0;
   foreach $project_category ( @projects ){
 
+    if ( ! $run_one_project_only) { 
+       # This is neeeded only when there are multiple projects and we want the bot
+       # to stop as soon as the current project is done with.
+       &check_watchdog_file();
+    }
+   
     if ( ! $run_one_project_only) { 
       $i++;
       print "<br/>\n<br/>\n";
@@ -274,8 +283,11 @@ sub main_wp10_routine {
   print   "--------------- Finished.<br/>\n";
   printf  "--------------- Running time: %2.2f hours <br/>\n",  
                                        (time() - $Init_time) / 3600;
-
-  remove_watchdog_file();
+  if (! $run_one_project_only){
+     # This is neeeded only when there are multiple projects and we want the bot
+     # to stop as soon as the current project is done with.
+     remove_watchdog_file();
+   }
 }
 
 ######################################################################
