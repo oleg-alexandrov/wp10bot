@@ -1,0 +1,1 @@
+Source code of the bot that updates [WP:1.0/I](http://en.wikipedia.org/wiki/WP:1.0/I).
